@@ -76,6 +76,7 @@ declare global {
   interface Window {
     electron: {
       selectDirectory: () => Promise<string | null>;
+      getDefaultDownloadPath: () => Promise<string>;
       checkBinaries: () => Promise<{ ytdlp: boolean; ffmpeg: boolean; path: string }>;
       getBinaryVersions: () => Promise<{ ytDlp: string; ffmpeg: string }>;
       getLatestBinaryVersions: () => Promise<{ ytDlp: string; ffmpeg: string }>;

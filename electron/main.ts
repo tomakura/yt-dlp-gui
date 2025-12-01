@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, net } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import https from 'https';
@@ -17,6 +17,7 @@ const require = createRequire(import.meta.url);
 // Safe require for optional dependencies
 let ffmpegStatic: string | null = null;
 let ytDlp: { path?: string } = {};
+
 
 try {
   ffmpegStatic = require('ffmpeg-static') as string | null;
@@ -92,10 +93,25 @@ const ensureAppPath = () => {
   }
 };
 
-const commandExists = (cmd: string) => {
+const commandExists = (cmd: string): boolean => {
   try {
-    const result = spawnSync(cmd, ['--version'], { windowsHide: true });
-    return result.status === 0;
+    if (isWindows) {
+      // On Windows, use 'where' command to check if executable exists in PATH
+      const result = spawnSync('where', [cmd], { 
+        windowsHide: true,
+        shell: true,
+        stdio: 'pipe',
+        encoding: 'utf-8'
+      });
+      return result.status === 0;
+    } else {
+      // On Unix-like systems, try running the command
+      const result = spawnSync(cmd, ['--version'], { 
+        windowsHide: true,
+        stdio: 'pipe'
+      });
+      return result.status === 0 && result.error === undefined;
+    }
   } catch {
     return false;
   }
@@ -529,19 +545,64 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('get-default-download-path', () => {
+  return app.getPath('downloads');
+});
+
 const fetchJson = (url: string): Promise<any> => {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'yt-dlp-gui' } }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => data += chunk);
-      res.on('end', () => {
+    const request = net.request({
+      url,
+      method: 'GET'
+    });
+    
+    request.setHeader('User-Agent', 'yt-dlp-gui/1.0.0');
+    request.setHeader('Accept', 'application/vnd.github.v3+json');
+    
+    let data = '';
+    
+    request.on('response', (response) => {
+      // Handle redirects
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        const location = Array.isArray(response.headers.location) 
+          ? response.headers.location[0] 
+          : response.headers.location;
+        fetchJson(location).then(resolve).catch(reject);
+        return;
+      }
+      
+      // Check for non-2xx status codes
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        console.error(`fetchJson failed: ${url} returned status ${response.statusCode}`);
+        reject(new Error(`HTTP ${response.statusCode}`));
+        return;
+      }
+      
+      response.on('data', (chunk) => {
+        data += chunk.toString();
+      });
+      
+      response.on('end', () => {
         try {
           resolve(JSON.parse(data));
         } catch (e) {
+          console.error(`fetchJson parse error for ${url}:`, e, 'Data:', data.substring(0, 200));
           reject(e);
         }
       });
-    }).on('error', reject);
+      
+      response.on('error', (error) => {
+        console.error(`fetchJson response error for ${url}:`, error);
+        reject(error);
+      });
+    });
+    
+    request.on('error', (error) => {
+      console.error(`fetchJson request error for ${url}:`, error);
+      reject(error);
+    });
+    
+    request.end();
   });
 };
 
@@ -573,18 +634,32 @@ ipcMain.handle('get-latest-binary-versions', async () => {
     }
   } else {
     // Windows/Linux uses yt-dlp/FFmpeg-Builds
+    // The "latest" release uses "master-latest" naming, extract N-number from release body or use tag
     try {
       const ffmpegRelease = await fetchJson('https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releases/latest');
-      if (ffmpegRelease && ffmpegRelease.tag_name) {
-        // tag_name is usually "latest" or "autobuild-YYYY-MM-DD-HH-MM"
-        // Try to extract version from assets or use simplified version
-        const assets = ffmpegRelease.assets || [];
-        const winAsset = assets.find((a: any) => a.name && a.name.includes('win64'));
-        if (winAsset && winAsset.name) {
-          // Extract version like "N-118134" from filename
-          const match = winAsset.name.match(/ffmpeg-(N-\d+)/);
-          if (match) {
-            ffmpegLatest = match[1];
+      if (ffmpegRelease) {
+        // Try to extract N-number from release body (usually contains version info)
+        const body = ffmpegRelease.body || '';
+        const nMatch = body.match(/N-(\d+)/);
+        if (nMatch) {
+          ffmpegLatest = `N-${nMatch[1]}`;
+        } else {
+          // Fallback: check assets for autobuild naming or use "latest" tag
+          const assets = ffmpegRelease.assets || [];
+          const platformPattern = isWindows ? 'win64' : 'linux64';
+          for (const asset of assets) {
+            if (asset.name && asset.name.includes(platformPattern)) {
+              // Try patterns like "ffmpeg-N-118134-..." or "ffmpeg-master-latest-..."
+              const match = asset.name.match(/ffmpeg-(N-\d+)/);
+              if (match) {
+                ffmpegLatest = match[1];
+                break;
+              }
+            }
+          }
+          // If still unknown, use a special marker for "latest" builds
+          if (ffmpegLatest === 'Unknown' && ffmpegRelease.tag_name === 'latest') {
+            ffmpegLatest = 'latest';
           }
         }
       }
@@ -593,6 +668,7 @@ ipcMain.handle('get-latest-binary-versions', async () => {
     }
   }
 
+  console.log('get-latest-binary-versions result:', { ytDlp: ytDlpLatest, ffmpeg: ffmpegLatest });
   return { ytDlp: ytDlpLatest, ffmpeg: ffmpegLatest };
 });
 
@@ -626,8 +702,16 @@ ipcMain.handle('get-binary-versions', async () => {
 
   if (ytDlpPath) {
     try {
-      const { stdout } = await execAsync(`"${ytDlpPath}" --version`);
-      ytDlpVersion = stdout.trim();
+      // Use spawnSync for more reliable execution on Windows
+      const result = spawnSync(ytDlpPath, ['--version'], {
+        windowsHide: true,
+        shell: true,
+        encoding: 'utf-8',
+        timeout: 10000
+      });
+      if (result.status === 0 && result.stdout) {
+        ytDlpVersion = result.stdout.trim();
+      }
     } catch (e) {
       console.error('Error getting yt-dlp version:', e);
     }
@@ -635,22 +719,29 @@ ipcMain.handle('get-binary-versions', async () => {
 
   if (ffmpegPath) {
     try {
-      const { stdout } = await execAsync(`"${ffmpegPath}" -version`);
-      // ffmpeg version output is verbose, usually first line: "ffmpeg version 4.4.1 ..." or "ffmpeg version N-121938-g..."
-      const firstLine = stdout.split('\n')[0];
-      const match = firstLine.match(/ffmpeg version (\S+)/);
-      if (match) {
-        let version = match[1];
-        // Truncate long git-based versions (e.g., "N-121938-g1a2b3c4d5e-..." -> "N-121938")
-        if (version.startsWith('N-') && version.length > 15) {
-          const parts = version.split('-');
-          if (parts.length >= 2) {
-            version = `${parts[0]}-${parts[1]}`;
+      const result = spawnSync(ffmpegPath, ['-version'], {
+        windowsHide: true,
+        shell: true,
+        encoding: 'utf-8',
+        timeout: 10000
+      });
+      if (result.status === 0 && result.stdout) {
+        // ffmpeg version output is verbose, usually first line: "ffmpeg version 4.4.1 ..." or "ffmpeg version N-121938-g..."
+        const firstLine = result.stdout.split('\n')[0];
+        const match = firstLine.match(/ffmpeg version (\S+)/);
+        if (match) {
+          let version = match[1];
+          // Truncate long git-based versions (e.g., "N-121938-g1a2b3c4d5e-..." -> "N-121938")
+          if (version.startsWith('N-') && version.length > 15) {
+            const parts = version.split('-');
+            if (parts.length >= 2) {
+              version = `${parts[0]}-${parts[1]}`;
+            }
           }
+          ffmpegVersion = version;
+        } else {
+          ffmpegVersion = firstLine; // Fallback
         }
-        ffmpegVersion = version;
-      } else {
-        ffmpegVersion = firstLine; // Fallback
       }
     } catch (e) {
       console.error('Error getting ffmpeg version:', e);
@@ -1021,8 +1112,9 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   });
 
   if (activeDownloadProcess.stdout) {
-    activeDownloadProcess.stdout.on('data', (data: Buffer) => {
-      const output = data.toString().trim();
+    activeDownloadProcess.stdout.setEncoding('utf8');
+    activeDownloadProcess.stdout.on('data', (data: string) => {
+      const output = data.trim();
       const lines = output.split('\n');
       
       lines.forEach(line => {
@@ -1042,8 +1134,9 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   }
 
   if (activeDownloadProcess.stderr) {
-    activeDownloadProcess.stderr.on('data', (data: Buffer) => {
-      event.reply('download-progress', data.toString());
+    activeDownloadProcess.stderr.setEncoding('utf8');
+    activeDownloadProcess.stderr.on('data', (data: string) => {
+      event.reply('download-progress', data);
     });
   }
 
@@ -1156,12 +1249,14 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
       
       const proc = spawn(ytdlpPath, args, { windowsHide: true });
       
-      proc.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
+      proc.stdout?.setEncoding('utf8');
+      proc.stdout?.on('data', (data: string) => {
+        stdout += data;
       });
       
-      proc.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
+      proc.stderr?.setEncoding('utf8');
+      proc.stderr?.on('data', (data: string) => {
+        stderr += data;
       });
       
       proc.on('close', (code) => {

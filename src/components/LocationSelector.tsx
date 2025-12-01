@@ -43,10 +43,11 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
 
   const isFavorite = location && favorites.includes(location);
 
-  // Get folder name from path for display
-  const getFolderName = (path: string) => {
-    const parts = path.split('/');
-    return parts[parts.length - 1] || path;
+  // Get folder name from path for display (handle both Windows \ and Unix /)
+  const getFolderName = (pathStr: string) => {
+    // Split by both forward and back slashes
+    const parts = pathStr.split(/[\\/]/);
+    return parts[parts.length - 1] || parts[parts.length - 2] || pathStr;
   };
 
   return (

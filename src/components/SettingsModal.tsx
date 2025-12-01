@@ -342,8 +342,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 															<div className="text-xs text-gray-500 mb-1">yt-dlp {t('version')}</div>
 															<div className="flex items-center gap-2">
 																<div className="text-sm font-mono text-gray-200">{binaryVersions?.ytDlp || t('unknown')}</div>
-																{latestBinaryVersions?.ytDlp && binaryVersions?.ytDlp === latestBinaryVersions.ytDlp && (
-																	<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">{t('latest')}</span>
+																{binaryVersions?.ytDlp && binaryVersions.ytDlp !== 'Not detected' && (
+																	latestBinaryVersions?.ytDlp && latestBinaryVersions.ytDlp !== 'Unknown' ? (
+																		binaryVersions.ytDlp === latestBinaryVersions.ytDlp ? (
+																			<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">{t('latest')}</span>
+																		) : (
+																			<span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/20">
+																				{t('updateAvailable')} → {latestBinaryVersions.ytDlp}
+																			</span>
+																		)
+																	) : null
 																)}
 															</div>
 														</div>
@@ -351,8 +359,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 															<div className="text-xs text-gray-500 mb-1">ffmpeg {t('version')}</div>
 															<div className="flex items-center gap-2">
 																<div className="text-sm font-mono text-gray-200">{binaryVersions?.ffmpeg || t('unknown')}</div>
-																{latestBinaryVersions?.ffmpeg && binaryVersions?.ffmpeg && binaryVersions.ffmpeg.includes(latestBinaryVersions.ffmpeg) && (
-																	<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">{t('latest')}</span>
+																{binaryVersions?.ffmpeg && binaryVersions.ffmpeg !== 'Not detected' && (
+																	// Show "latest" badge if: ffmpeg is N-* version (yt-dlp/FFmpeg-Builds latest), versions match, or API returned "latest" marker
+																	(binaryVersions.ffmpeg.startsWith('N-') ||
+																	 (latestBinaryVersions?.ffmpeg && (
+																		binaryVersions.ffmpeg === latestBinaryVersions.ffmpeg ||
+																		binaryVersions.ffmpeg.includes(latestBinaryVersions.ffmpeg) ||
+																		latestBinaryVersions.ffmpeg === 'latest'
+																	 ))) ? (
+																		<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">{t('latest')}</span>
+																	) : latestBinaryVersions?.ffmpeg && latestBinaryVersions.ffmpeg !== 'Unknown' && (
+																		<span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/20">
+																			{t('updateAvailable')} → {latestBinaryVersions.ffmpeg}
+																		</span>
+																	)
 																)}
 															</div>
 														</div>

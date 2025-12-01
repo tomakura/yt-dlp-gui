@@ -439,6 +439,14 @@ function App() {
 		const savedTemplate = localStorage.getItem('outputTemplate');
 		if (savedTemplate) setOutputTemplate(savedTemplate);
 
+		// Set default download location if not already set
+		if (!location) {
+			window.electron.getDefaultDownloadPath().then(defaultPath => {
+				setLocation(defaultPath);
+				localStorage.setItem('lastLocation', defaultPath);
+			}).catch(err => console.error('Failed to get default download path', err));
+		}
+
 		checkBinaries();
 	}, []);
 
@@ -886,7 +894,6 @@ function App() {
 							</div>
 
 							<div className="mt-auto pt-2 shrink-0 space-y-3">
-
 
 								<div className="flex gap-2">
 									<motion.button
