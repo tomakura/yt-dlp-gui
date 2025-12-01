@@ -30,12 +30,15 @@ try {
   console.log('yt-dlp-exec not available');
 }
 
+type HwEncoder = 'auto' | 'none' | 'nvenc' | 'qsv' | 'videotoolbox' | 'amf';
+
 interface VideoConversionOptions {
   enabled: boolean;
   videoCodec: 'copy' | 'h264' | 'h265' | 'vp9' | 'av1';
   videoBitrate: string;
   audioCodec: 'copy' | 'aac' | 'mp3' | 'opus';
   audioBitrate: string;
+  hwEncoder?: HwEncoder;
 }
 
 interface DownloadPayload {
@@ -66,11 +69,24 @@ interface DownloadPayload {
 }
 
 const isWindows = process.platform === 'win32';
-const appPath = app.isPackaged
-  ? path.join(process.resourcesPath, 'Application')
-  : path.join(process.cwd(), 'Application');
+
+// Use userData folder for binaries (writable location)
+// Development: use project's Application folder
+// Production: use app.getPath('userData')/bin
+const getAppPath = () => {
+  if (app.isPackaged) {
+    return path.join(app.getPath('userData'), 'bin');
+  }
+  return path.join(process.cwd(), 'Application');
+};
+
+// Initialize appPath after app is ready
+let appPath = '';
 
 const ensureAppPath = () => {
+  if (!appPath) {
+    appPath = getAppPath();
+  }
   if (!fs.existsSync(appPath)) {
     fs.mkdirSync(appPath, { recursive: true });
   }
@@ -88,6 +104,7 @@ const commandExists = (cmd: string) => {
 const ytDlpBinaryPath = (ytDlp as unknown as { path?: string }).path;
 
 const resolveYtDlpPath = () => {
+  ensureAppPath();
   const bundled = path.join(appPath, isWindows ? 'yt-dlp.exe' : 'yt-dlp');
   if (fs.existsSync(bundled)) return bundled;
   
@@ -96,6 +113,7 @@ const resolveYtDlpPath = () => {
 };
 
 const resolveFfmpegPath = () => {
+  ensureAppPath();
   const bundled = path.join(appPath, isWindows ? 'ffmpeg.exe' : 'ffmpeg');
   if (fs.existsSync(bundled)) return bundled;
 
@@ -217,11 +235,34 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
   });
 
 const downloadYtDlp = async (onProgress?: (percent: number, downloaded: number, total: number, speed: number) => void) => {
+  const isMac = process.platform === 'darwin';
   const target = path.join(appPath, isWindows ? 'yt-dlp.exe' : 'yt-dlp');
-  const url = isWindows
-    ? 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
-    : 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+  
+  let url: string;
+  if (isWindows) {
+    url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+  } else if (isMac) {
+    // Use standalone binary for macOS (doesn't require Python)
+    url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+  } else {
+    // Linux - use the Python zipapp
+    url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+  }
+  
   await downloadFile(url, target, onProgress);
+  
+  // Set executable permission and remove quarantine on macOS
+  if (!isWindows) {
+    await fs.promises.chmod(target, 0o755);
+    if (isMac) {
+      try {
+        await execAsync(`xattr -d com.apple.quarantine "${target}"`);
+      } catch {
+        // Ignore if quarantine attribute doesn't exist
+      }
+    }
+  }
+  
   onProgress?.(100, 0, 0, 0);
   return target;
 };
@@ -237,7 +278,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
   // Note: Currently using x64 builds which work on ARM64 via Rosetta 2
   if (isMac) {
     try {
-      onStatus?.('ffmpeg と ffprobe をダウンロード中 (GitHub)...');
+      onStatus?.('Downloading ffmpeg and ffprobe (GitHub)...');
       
       // Using ffbinaries v6.1
       const version = '6.1';
@@ -277,7 +318,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
       await Promise.all([p1, p2]);
       
       // Extract (80-100%)
-      onStatus?.('ffmpeg/ffprobe を展開中...');
+      onStatus?.('Extracting ffmpeg/ffprobe...');
       onProgress?.(85, 0, 0, 0);
       
       await Promise.all([
@@ -332,7 +373,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
   const tempFile = path.join(appPath, isWindows ? 'ffmpeg-temp.zip' : 'ffmpeg-temp.tar.xz');
   
   try {
-    onStatus?.('ffmpeg をダウンロード中...');
+    onStatus?.('Downloading ffmpeg...');
     await downloadFile(url, tempFile, (p, downloaded, total, speed) => {
       if (p >= 0) {
         onProgress?.(Math.round(p * 0.8), downloaded, total, speed); // 0-80% for download
@@ -341,22 +382,34 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
       }
     });
     
-    onStatus?.('ffmpeg を展開中...');
+    onStatus?.('Extracting ffmpeg...');
     onProgress?.(85, 0, 0, 0);
     
     if (isWindows) {
-      // Extract zip on Windows
-      const AdmZip = require('adm-zip');
-      const zip = new AdmZip(tempFile);
-      const entries = zip.getEntries();
-      for (const entry of entries) {
-        if (entry.entryName.endsWith('ffmpeg.exe')) {
-          zip.extractEntryTo(entry, appPath, false, true);
+      // Extract zip on Windows using PowerShell
+      const extractDir = path.join(appPath, 'ffmpeg-extract');
+      
+      // Use PowerShell to extract the zip
+      await execAsync(`powershell -NoProfile -Command "Expand-Archive -Path '${tempFile}' -DestinationPath '${extractDir}' -Force"`);
+      
+      // Find and move ffmpeg.exe and ffprobe.exe
+      const findAndMove = async (dir: string) => {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            await findAndMove(fullPath);
+          } else if (entry.name === 'ffmpeg.exe') {
+            fs.copyFileSync(fullPath, ffmpegTarget);
+          } else if (entry.name === 'ffprobe.exe') {
+            fs.copyFileSync(fullPath, ffprobeTarget);
+          }
         }
-        if (entry.entryName.endsWith('ffprobe.exe')) {
-          zip.extractEntryTo(entry, appPath, false, true);
-        }
-      }
+      };
+      await findAndMove(extractDir);
+      
+      // Clean up extract directory
+      fs.rmSync(extractDir, { recursive: true, force: true });
     } else if (isLinux) {
       // Extract tar.xz on Linux - extract both ffmpeg and ffprobe
       try {
@@ -392,7 +445,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
     }
     
     onProgress?.(95, 0, 0, 0);
-    onStatus?.('クリーンアップ中...');
+    onStatus?.('Cleaning up...');
     
     // Clean up temp file
     if (fs.existsSync(tempFile)) {
@@ -443,6 +496,7 @@ const createWindow = () => {
       height: 30,
     },
     backgroundColor: '#1a1a1a',
+    icon: path.join(__dirname, '../build/icon.png'),
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -492,8 +546,8 @@ const fetchJson = (url: string): Promise<any> => {
 };
 
 ipcMain.handle('get-latest-binary-versions', async () => {
-  let ytDlpLatest = '不明';
-  let ffmpegLatest = '不明';
+  let ytDlpLatest = 'Unknown';
+  let ffmpegLatest = 'Unknown';
 
   try {
     const ytDlpRelease = await fetchJson('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest');
@@ -504,20 +558,39 @@ ipcMain.handle('get-latest-binary-versions', async () => {
     console.error('Failed to fetch yt-dlp latest version', e);
   }
 
-  // For ffmpeg, we use ffbinaries which doesn't have a simple API for "latest version" that matches the binary version exactly.
-  // But we can try to fetch from ffbinaries API if available, or just skip it for now.
-  // ffbinaries-node uses http://ffbinaries.com/api/v1/version/latest
-  try {
-    // This is a guess based on ffbinaries-node behavior
-    // Actually, let's just check the github release for ffbinaries-prebuilt if possible, 
-    // or just return '不明' if it's too complex.
-    // Let's try fetching from ffbinaries.com API
-    const ffmpegData = await fetchJson('https://ffbinaries.com/api/v1/version/latest');
-    if (ffmpegData && ffmpegData.version) {
-      ffmpegLatest = ffmpegData.version;
+  // Determine ffmpeg source based on platform
+  const isMac = process.platform === 'darwin';
+  
+  if (isMac) {
+    // macOS uses ffbinaries
+    try {
+      const ffmpegData = await fetchJson('https://ffbinaries.com/api/v1/version/latest');
+      if (ffmpegData && ffmpegData.version) {
+        ffmpegLatest = ffmpegData.version;
+      }
+    } catch (e) {
+      console.error('Failed to fetch ffmpeg latest version from ffbinaries', e);
     }
-  } catch (e) {
-    console.error('Failed to fetch ffmpeg latest version', e);
+  } else {
+    // Windows/Linux uses yt-dlp/FFmpeg-Builds
+    try {
+      const ffmpegRelease = await fetchJson('https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releases/latest');
+      if (ffmpegRelease && ffmpegRelease.tag_name) {
+        // tag_name is usually "latest" or "autobuild-YYYY-MM-DD-HH-MM"
+        // Try to extract version from assets or use simplified version
+        const assets = ffmpegRelease.assets || [];
+        const winAsset = assets.find((a: any) => a.name && a.name.includes('win64'));
+        if (winAsset && winAsset.name) {
+          // Extract version like "N-118134" from filename
+          const match = winAsset.name.match(/ffmpeg-(N-\d+)/);
+          if (match) {
+            ffmpegLatest = match[1];
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch ffmpeg latest version from yt-dlp/FFmpeg-Builds', e);
+    }
   }
 
   return { ytDlp: ytDlpLatest, ffmpeg: ffmpegLatest };
@@ -533,8 +606,10 @@ ipcMain.handle('cancel-download', () => {
 });
 
 ipcMain.handle('check-binaries', async () => {
+  ensureAppPath();
   const ytDlpPath = resolveYtDlpPath();
   const ffmpegPath = resolveFfmpegPath();
+  console.log('check-binaries:', { ytDlpPath, ffmpegPath, appPath });
   return {
     ytdlp: !!ytDlpPath,
     ffmpeg: !!ffmpegPath,
@@ -546,8 +621,8 @@ ipcMain.handle('get-binary-versions', async () => {
   const ytDlpPath = resolveYtDlpPath();
   const ffmpegPath = resolveFfmpegPath();
   
-  let ytDlpVersion = '未検出';
-  let ffmpegVersion = '未検出';
+  let ytDlpVersion = 'Not detected';
+  let ffmpegVersion = 'Not detected';
 
   if (ytDlpPath) {
     try {
@@ -561,11 +636,19 @@ ipcMain.handle('get-binary-versions', async () => {
   if (ffmpegPath) {
     try {
       const { stdout } = await execAsync(`"${ffmpegPath}" -version`);
-      // ffmpeg version output is verbose, usually first line: "ffmpeg version 4.4.1 ..."
+      // ffmpeg version output is verbose, usually first line: "ffmpeg version 4.4.1 ..." or "ffmpeg version N-121938-g..."
       const firstLine = stdout.split('\n')[0];
       const match = firstLine.match(/ffmpeg version (\S+)/);
       if (match) {
-        ffmpegVersion = match[1];
+        let version = match[1];
+        // Truncate long git-based versions (e.g., "N-121938-g1a2b3c4d5e-..." -> "N-121938")
+        if (version.startsWith('N-') && version.length > 15) {
+          const parts = version.split('-');
+          if (parts.length >= 2) {
+            version = `${parts[0]}-${parts[1]}`;
+          }
+        }
+        ffmpegVersion = version;
       } else {
         ffmpegVersion = firstLine; // Fallback
       }
@@ -581,7 +664,7 @@ ipcMain.handle('update-ytdlp', async (event) => {
   try {
     binaryDownloadController = new AbortController();
     const [window] = BrowserWindow.getAllWindows();
-    let currentStatus = 'yt-dlp をダウンロード中...';
+    let currentStatus = 'Downloading yt-dlp...';
     const sendProgress = (percent: number, status: string, downloaded?: number) => {
       window?.webContents.send('binary-update-progress', { type: 'ytdlp', percent, status, downloaded });
     };
@@ -615,7 +698,7 @@ ipcMain.handle('update-ffmpeg', async (event) => {
   try {
     binaryDownloadController = new AbortController();
     const [window] = BrowserWindow.getAllWindows();
-    let currentStatus = 'ffmpeg をダウンロード中...';
+    let currentStatus = 'Downloading ffmpeg...';
     const sendProgress = (percent: number, status: string, downloaded?: number) => {
       window?.webContents.send('binary-update-progress', { type: 'ffmpeg', percent, status, downloaded });
     };
@@ -665,7 +748,7 @@ ipcMain.handle('download-binaries', async () => {
   try {
     binaryDownloadController = new AbortController();
     const [window] = BrowserWindow.getAllWindows();
-    let currentStatus = 'yt-dlp をダウンロード中...';
+    let currentStatus = 'Downloading yt-dlp...';
     
     const sendProgress = (percent: number, status: string, downloaded?: number) => {
       window?.webContents.send('binary-update-progress', { type: 'all', percent, status, downloaded });
@@ -686,10 +769,10 @@ ipcMain.handle('download-binaries', async () => {
       }
     });
     
-    sendProgress(20, 'yt-dlp のダウンロード完了');
+    sendProgress(20, 'yt-dlp download complete');
 
     // 2. Download ffmpeg (20-100%)
-    currentStatus = 'ffmpeg をダウンロード中...';
+    currentStatus = 'Downloading ffmpeg...';
     await downloadFfmpeg(
       (percent, downloaded, total, speed) => {
         if (percent >= 0) {
@@ -732,7 +815,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   const ffmpegPath = resolveFfmpegPath();
 
   if (!ytdlpPath) {
-    event.reply('download-complete', { success: false, message: 'yt-dlp が見つかりませんでした。' });
+    event.reply('download-complete', { success: false, message: 'yt-dlp not found.' });
     return;
   }
 
@@ -745,12 +828,12 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     try {
       fs.chmodSync(ytdlpPath, 0o755);
     } catch (e2: any) {
-      event.reply('download-complete', { success: false, message: `yt-dlp の実行権限がありません: ${e2.message}` });
+      event.reply('download-complete', { success: false, message: `No execution permission for yt-dlp: ${e2.message}` });
       return;
     }
   }
 
-  event.reply('download-progress', '📥 yt-dlpを呼び出しています...');
+  event.reply('download-progress', '📥 Calling yt-dlp...');
   event.reply('download-progress', `🔗 URL: ${payload.url}`);
   event.reply('download-progress', `🛠 yt-dlp Path: ${ytdlpPath}`);
 
@@ -763,6 +846,8 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     '--no-mtime',
     '--print', 'after_move:filepath',
     '--print', 'title',
+    // Use default player client to avoid SABR streaming issues
+    '--extractor-args', 'youtube:player_client=default',
   ];
 
   if (ffmpegPath && ffmpegPath !== 'ffmpeg') {
@@ -789,7 +874,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   if (payload.advancedOptions.playlist === 'playlist') args.push('--yes-playlist');
 
   if (payload.options.type === 'audio') {
-    event.reply('download-progress', `🎵 音声形式: ${payload.options.audioFormat.toUpperCase()}`);
+    event.reply('download-progress', `🎵 Audio format: ${payload.options.audioFormat.toUpperCase()}`);
     
     args.push(
       '-x',
@@ -799,17 +884,17 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     
     // WAV uses bit depth instead of bitrate
     if (payload.options.audioFormat === 'wav') {
-      event.reply('download-progress', `📊 ビット深度: ${payload.options.audioBitDepth || '16'}bit`);
+      event.reply('download-progress', `📊 Bit depth: ${payload.options.audioBitDepth || '16'}bit`);
       // WAV doesn't support --audio-quality, use postprocessor args for bit depth
       const bitDepth = payload.options.audioBitDepth || '16';
       args.push('--postprocessor-args', `ffmpeg:-acodec pcm_s${bitDepth}le`);
     } else {
-      event.reply('download-progress', `📊 ビットレート: ${payload.options.audioBitrate}`);
+      event.reply('download-progress', `📊 Bitrate: ${payload.options.audioBitrate}`);
       args.push('--audio-quality', payload.options.audioBitrate);
     }
   } else {
-    event.reply('download-progress', `🎬 動画形式: ${payload.options.videoContainer.toUpperCase()}`);
-    event.reply('download-progress', `📐 解像度: ${payload.options.videoResolution}`);
+    event.reply('download-progress', `🎬 Video format: ${payload.options.videoContainer.toUpperCase()}`);
+    event.reply('download-progress', `📐 Resolution: ${payload.options.videoResolution}`);
     
     if (payload.options.videoResolution !== 'best') {
       const height = payload.options.videoResolution.replace('p', '');
@@ -821,18 +906,75 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     
     // Video conversion options
     if (payload.videoConversion?.enabled) {
-      event.reply('download-progress', `🔄 変換オプション: 動画コーデック=${payload.videoConversion.videoCodec}, 音声コーデック=${payload.videoConversion.audioCodec}`);
+      event.reply('download-progress', `🔄 Conversion: video=${payload.videoConversion.videoCodec}, audio=${payload.videoConversion.audioCodec}`);
       
       const postArgs: string[] = [];
+      const hwEncoder = payload.videoConversion.hwEncoder || 'auto';
       
       if (payload.videoConversion.videoCodec !== 'copy') {
-        const codecMap: Record<string, string> = {
-          'h264': 'libx264',
-          'h265': 'libx265',
-          'vp9': 'libvpx-vp9',
-          'av1': 'libaom-av1'
+        // Hardware encoder mapping
+        const getHwEncoderCodec = (codec: string, hw: HwEncoder): string => {
+          if (hw === 'none') {
+            // Software encoders
+            const softwareCodecMap: Record<string, string> = {
+              'h264': 'libx264',
+              'h265': 'libx265',
+              'vp9': 'libvpx-vp9',
+              'av1': 'libaom-av1'
+            };
+            return softwareCodecMap[codec] || 'libx264';
+          }
+          
+          // Hardware encoder specific codecs
+          const hwCodecMap: Record<string, Record<string, string>> = {
+            'nvenc': {
+              'h264': 'h264_nvenc',
+              'h265': 'hevc_nvenc',
+              'av1': 'av1_nvenc'
+            },
+            'qsv': {
+              'h264': 'h264_qsv',
+              'h265': 'hevc_qsv',
+              'av1': 'av1_qsv',
+              'vp9': 'vp9_qsv'
+            },
+            'videotoolbox': {
+              'h264': 'h264_videotoolbox',
+              'h265': 'hevc_videotoolbox'
+            },
+            'amf': {
+              'h264': 'h264_amf',
+              'h265': 'hevc_amf'
+            }
+          };
+          
+          if (hw === 'auto') {
+            // Try to detect available encoder
+            // Priority: videotoolbox (macOS) > nvenc > qsv > amf > software
+            const isMacOS = process.platform === 'darwin';
+            if (isMacOS && hwCodecMap['videotoolbox'][codec]) {
+              return hwCodecMap['videotoolbox'][codec];
+            }
+            // For auto on other platforms, fall back to software
+            const softwareCodecMap: Record<string, string> = {
+              'h264': 'libx264',
+              'h265': 'libx265',
+              'vp9': 'libvpx-vp9',
+              'av1': 'libaom-av1'
+            };
+            return softwareCodecMap[codec] || 'libx264';
+          }
+          
+          return hwCodecMap[hw]?.[codec] || 'libx264';
         };
-        postArgs.push(`-c:v ${codecMap[payload.videoConversion.videoCodec]}`);
+        
+        const selectedCodec = getHwEncoderCodec(payload.videoConversion.videoCodec, hwEncoder);
+        postArgs.push(`-c:v ${selectedCodec}`);
+        
+        if (hwEncoder !== 'none' && hwEncoder !== 'auto') {
+          event.reply('download-progress', `🎮 Using hardware encoder: ${hwEncoder.toUpperCase()}`);
+        }
+        
         if (payload.videoConversion.videoBitrate) {
           postArgs.push(`-b:v ${payload.videoConversion.videoBitrate}`);
         }
@@ -860,13 +1002,23 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     args.push(...payload.args);
   }
 
-  event.reply('download-progress', '⏳ ダウンロードを開始します...');
+  event.reply('download-progress', '⏳ Starting download...');
 
   let downloadedTitle = '';
   let downloadedFilepath = '';
 
   isDownloadCancelled = false;
-  activeDownloadProcess = spawn(ytdlpPath, args, { windowsHide: true });
+  
+  // Provide Node.js path to yt-dlp for JavaScript runtime support
+  const spawnEnv = {
+    ...process.env,
+    PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}`
+  };
+  
+  activeDownloadProcess = spawn(ytdlpPath, args, { 
+    windowsHide: true,
+    env: spawnEnv
+  });
 
   if (activeDownloadProcess.stdout) {
     activeDownloadProcess.stdout.on('data', (data: Buffer) => {
@@ -896,18 +1048,18 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   }
 
   activeDownloadProcess.on('error', (error) => {
-    event.reply('download-progress', `❌ エラー: ${error.message}`);
-    event.reply('download-complete', { success: false, message: 'ダウンロード開始に失敗しました。' });
+    event.reply('download-progress', `❌ Error: ${error.message}`);
+    event.reply('download-complete', { success: false, message: 'Failed to start download.' });
   });
 
   activeDownloadProcess.on('close', (code) => {
     activeDownloadProcess = null;
 
     if (isDownloadCancelled) {
-      event.reply('download-progress', '🚫 ダウンロードをキャンセルしました。');
+      event.reply('download-progress', '🚫 Download cancelled.');
       event.reply('download-complete', { 
         success: false, 
-        message: 'ダウンロードをキャンセルしました。',
+        message: 'Download cancelled.',
         title: downloadedTitle,
         filename: downloadedFilepath
       });
@@ -925,19 +1077,19 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     }
     
     if (code === 0) {
-      event.reply('download-progress', '✅ ダウンロードが完了しました！');
+      event.reply('download-progress', '✅ Download complete!');
       event.reply('download-complete', { 
         success: true, 
-        message: 'ダウンロードが完了しました。',
+        message: 'Download complete.',
         title: downloadedTitle,
         filename: downloadedFilepath,
         fileSize
       });
     } else {
-      event.reply('download-progress', `❌ エラーが発生しました (コード: ${code})`);
+      event.reply('download-progress', `❌ Error occurred (code: ${code})`);
       event.reply('download-complete', { 
         success: false, 
-        message: `エラーが発生しました (コード: ${code})`,
+        message: `Error occurred (code: ${code})`,
         title: downloadedTitle,
         filename: downloadedFilepath,
         fileSize
@@ -972,11 +1124,205 @@ ipcMain.handle('check-app-update', async () => {
     return { 
       available: false, 
       currentVersion: app.getVersion(),
-      error: '更新の確認に失敗しました' 
+      error: 'Failed to check for updates' 
     };
   }
 });
 
 ipcMain.handle('open-external', async (_, url) => {
   await shell.openExternal(url);
+});
+
+// Fetch video information for preview
+ipcMain.handle('fetch-video-info', async (_, url: string) => {
+  const ytdlpPath = resolveYtDlpPath();
+  
+  if (!ytdlpPath) {
+    return { error: 'yt-dlp not found' };
+  }
+
+  try {
+    const args = [
+      url,
+      '-J', // Output JSON
+      '--flat-playlist', // Don't download playlist videos, just get info
+      '--no-warnings',
+      '--extractor-args', 'youtube:player_client=default',
+    ];
+
+    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      
+      const proc = spawn(ytdlpPath, args, { windowsHide: true });
+      
+      proc.stdout?.on('data', (data: Buffer) => {
+        stdout += data.toString();
+      });
+      
+      proc.stderr?.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+      
+      proc.on('close', (code) => {
+        if (code === 0) {
+          resolve({ stdout, stderr });
+        } else {
+          reject(new Error(stderr || `Process exited with code ${code}`));
+        }
+      });
+      
+      proc.on('error', reject);
+      
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        proc.kill();
+        reject(new Error('Timeout'));
+      }, 30000);
+    });
+
+    const data = JSON.parse(result.stdout);
+    
+    // Check if it's a playlist
+    if (data._type === 'playlist' && data.entries) {
+      // For playlists, we need to get more details for each entry
+      // But for performance, we'll limit to first 50 entries
+      const entries = data.entries.slice(0, 50).map((entry: any) => ({
+        id: entry.id || entry.url,
+        title: entry.title || 'Unknown',
+        channel: entry.channel || entry.uploader || data.channel || data.uploader || 'Unknown',
+        thumbnail: entry.thumbnail || entry.thumbnails?.[0]?.url || '',
+        duration: entry.duration || 0,
+        viewCount: entry.view_count,
+        filesize: entry.filesize || entry.filesize_approx,
+      }));
+
+      return {
+        isPlaylist: true,
+        playlist: {
+          id: data.id,
+          title: data.title,
+          channel: data.channel || data.uploader || 'Unknown',
+          thumbnail: data.thumbnail || data.thumbnails?.[0]?.url || entries[0]?.thumbnail,
+          videoCount: data.playlist_count || entries.length,
+          entries,
+        }
+      };
+    }
+
+    // Single video
+    // Get format info for size estimation
+    const formats = (data.formats || []).map((f: any) => ({
+      format_id: f.format_id,
+      ext: f.ext,
+      resolution: f.resolution || (f.height ? `${f.width}x${f.height}` : null),
+      height: f.height,
+      filesize: f.filesize,
+      filesize_approx: f.filesize_approx,
+      vcodec: f.vcodec,
+      acodec: f.acodec,
+      tbr: f.tbr,
+      abr: f.abr,
+    }));
+
+    // Calculate approximate total size
+    let estimatedSize = 0;
+    const videoFormats = formats.filter((f: any) => f.vcodec && f.vcodec !== 'none');
+    const audioFormats = formats.filter((f: any) => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
+    
+    if (videoFormats.length > 0) {
+      const bestVideo = videoFormats.sort((a: any, b: any) => 
+        (b.filesize || b.filesize_approx || 0) - (a.filesize || a.filesize_approx || 0)
+      )[0];
+      estimatedSize += bestVideo.filesize || bestVideo.filesize_approx || 0;
+    }
+    
+    if (audioFormats.length > 0) {
+      const bestAudio = audioFormats.sort((a: any, b: any) => 
+        (b.filesize || b.filesize_approx || 0) - (a.filesize || a.filesize_approx || 0)
+      )[0];
+      estimatedSize += bestAudio.filesize || bestAudio.filesize_approx || 0;
+    }
+
+    // Get best resolution from video formats
+    let bestResolution: string | undefined;
+    if (videoFormats.length > 0) {
+      // Get all heights and find the max
+      const heights = (data.formats || [])
+        .filter((f: any) => f.height && f.vcodec && f.vcodec !== 'none')
+        .map((f: any) => f.height);
+      
+      if (heights.length > 0) {
+        const maxHeight = Math.max(...heights);
+        // Convert to standard resolution names
+        if (maxHeight >= 2160) bestResolution = '4K';
+        else if (maxHeight >= 1440) bestResolution = '1440p';
+        else if (maxHeight >= 1080) bestResolution = '1080p';
+        else if (maxHeight >= 720) bestResolution = '720p';
+        else if (maxHeight >= 480) bestResolution = '480p';
+        else if (maxHeight >= 360) bestResolution = '360p';
+        else bestResolution = `${maxHeight}p`;
+      }
+    }
+
+    return {
+      isPlaylist: false,
+      video: {
+        id: data.id,
+        title: data.title || 'Unknown',
+        channel: data.channel || data.uploader || 'Unknown',
+        channelUrl: data.channel_url || data.uploader_url,
+        thumbnail: data.thumbnail || data.thumbnails?.slice(-1)[0]?.url || '',
+        duration: data.duration || 0,
+        viewCount: data.view_count,
+        uploadDate: data.upload_date,
+        description: data.description?.substring(0, 200),
+        filesize: estimatedSize || data.filesize || data.filesize_approx,
+        formats,
+        bestResolution,
+      }
+    };
+  } catch (error: any) {
+    console.error('Failed to fetch video info:', error);
+    return { error: error.message || 'Failed to fetch video info' };
+  }
+});
+
+// Detect available hardware encoders
+ipcMain.handle('detect-hw-encoders', async () => {
+  const ffmpegPath = resolveFfmpegPath();
+  
+  if (!ffmpegPath) {
+    return { available: [] };
+  }
+
+  const encoders: string[] = [];
+  
+  try {
+    const { stdout } = await execAsync(`"${ffmpegPath}" -hide_banner -encoders`);
+    
+    // Check for NVENC (NVIDIA)
+    if (stdout.includes('h264_nvenc') || stdout.includes('hevc_nvenc')) {
+      encoders.push('nvenc');
+    }
+    
+    // Check for QuickSync (Intel)
+    if (stdout.includes('h264_qsv') || stdout.includes('hevc_qsv')) {
+      encoders.push('qsv');
+    }
+    
+    // Check for VideoToolbox (Apple)
+    if (stdout.includes('h264_videotoolbox') || stdout.includes('hevc_videotoolbox')) {
+      encoders.push('videotoolbox');
+    }
+    
+    // Check for AMF (AMD)
+    if (stdout.includes('h264_amf') || stdout.includes('hevc_amf')) {
+      encoders.push('amf');
+    }
+  } catch (e) {
+    console.error('Failed to detect hardware encoders:', e);
+  }
+  
+  return { available: encoders };
 });

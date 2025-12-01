@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Download, Terminal, AlertCircle, X, Settings as SettingsIcon, History, XCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Download, Terminal, AlertCircle, X, Settings as SettingsIcon, History, XCircle, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UrlInput } from './components/UrlInput';
 import { FormatSelector } from './components/FormatSelector';
@@ -8,9 +8,14 @@ import { AdvancedOptions } from './components/AdvancedOptions';
 import { StatusToast, Status } from './components/StatusToast';
 import { SettingsModal } from './components/SettingsModal';
 import { DownloadHistory } from './components/DownloadHistory';
-import { FormatOptions, AdvancedOptionsState, VideoConversionOptions, DownloadHistoryItem } from './types/options';
+import { VideoPreview, VideoInfo, PlaylistInfo } from './components/VideoPreview';
+import { FormatOptions, AdvancedOptionsState, DownloadHistoryItem } from './types/options';
 import { DownloadResult } from './types/electron';
 import { Preset } from './types/Preset';
+import { useI18n } from './i18n';
+
+// Detect OS for keyboard shortcut display
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
 // Theme Definitions
 type Theme = 'default' | 'cyberpunk' | 'ocean' | 'forest';
@@ -98,6 +103,7 @@ const themes: Record<Theme, {
 };
 
 function App() {
+	const { t } = useI18n();
 	const [url, setUrl] = useState('');
 	const [location, setLocation] = useState(() => {
 		return localStorage.getItem('lastLocation') || '';
@@ -126,17 +132,6 @@ function App() {
 			audioBitDepth: '16'
 		};
 		return { ...parsed, type: 'video' };
-	});
-
-	const [videoConversion, setVideoConversion] = useState<VideoConversionOptions>(() => {
-		const saved = localStorage.getItem('videoConversion');
-		return saved ? JSON.parse(saved) : {
-			enabled: false,
-			videoCodec: 'copy',
-			videoBitrate: '',
-			audioCodec: 'copy',
-			audioBitrate: ''
-		};
 	});
 
 	const [advancedOptions, setAdvancedOptions] = useState<AdvancedOptionsState>(() => {
@@ -188,7 +183,98 @@ function App() {
 	const [downloadProgress, setDownloadProgress] = useState(0);
 	const [currentDownloadUrl, setCurrentDownloadUrl] = useState('');
 
+	// Download Progress Details
+	const [downloadSpeed, setDownloadSpeed] = useState<string>('');
+	const [downloadedSize, setDownloadedSize] = useState<string>('');
+	const [totalSize, setTotalSize] = useState<string>('');
+	const [eta, setEta] = useState<string>('');
+
+	// Video Preview State
+	const [videoPreviewLoading, setVideoPreviewLoading] = useState(false);
+	const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
+	const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+	const [playlistInfo, setPlaylistInfo] = useState<PlaylistInfo | null>(null);
+	const [isVideoPreviewExpanded, setIsVideoPreviewExpanded] = useState(true);
+
 	const isMac = navigator.userAgent.includes('Mac');
+
+	// Calculate estimated size based on format options and video info
+	const estimatedSize = useMemo(() => {
+		const currentVideo = videoInfo || playlistInfo?.entries?.[0];
+		if (!currentVideo) return undefined;
+
+		const duration = currentVideo.duration || 0;
+		const formats = currentVideo.formats || [];
+
+		if (formatOptions.type === 'video') {
+			const videoFormats = formats.filter(f => f.vcodec && f.vcodec !== 'none');
+			const audioFormats = formats.filter(f => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
+			
+			if (!videoFormats.length) return currentVideo.filesize;
+
+			// Find matching video format based on resolution
+			let matchingVideoFormat;
+			if (formatOptions.videoResolution === 'best') {
+				matchingVideoFormat = [...videoFormats].sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+			} else {
+				const targetHeight = parseInt(formatOptions.videoResolution, 10);
+				if (Number.isFinite(targetHeight)) {
+					matchingVideoFormat = [...videoFormats].sort((a, b) =>
+						Math.abs((a.height || 0) - targetHeight) - Math.abs((b.height || 0) - targetHeight)
+					)[0];
+				} else {
+					matchingVideoFormat = videoFormats[0];
+				}
+			}
+
+			// Get video size
+			let videoSize = matchingVideoFormat?.filesize || matchingVideoFormat?.filesize_approx || 0;
+			
+			// If no filesize, estimate from bitrate and duration
+			if (!videoSize && matchingVideoFormat?.tbr && duration > 0) {
+				// tbr is total bitrate in kbps
+				videoSize = Math.round((matchingVideoFormat.tbr * 1000 * duration) / 8);
+			}
+
+			// Get best audio size
+			let audioSize = 0;
+			if (audioFormats.length > 0) {
+				const bestAudio = [...audioFormats].sort((a, b) => 
+					(b.filesize || b.filesize_approx || 0) - (a.filesize || a.filesize_approx || 0)
+				)[0];
+				audioSize = bestAudio?.filesize || bestAudio?.filesize_approx || 0;
+				
+				// If no audio filesize, estimate (assume ~128kbps audio)
+				if (!audioSize && duration > 0) {
+					audioSize = Math.round((128 * 1000 * duration) / 8);
+				}
+			}
+
+			const totalSize = videoSize + audioSize;
+			return totalSize > 0 ? totalSize : currentVideo.filesize;
+		}
+
+		// For audio, calculate based on duration and bitrate
+		if (!duration || duration <= 0) return undefined;
+
+		let bitrateKbps = 320; // default
+		const bitrateMatch = formatOptions.audioBitrate?.match(/(\d+)/);
+		if (bitrateMatch) {
+			bitrateKbps = parseInt(bitrateMatch[1], 10);
+		}
+
+		if (formatOptions.audioFormat === 'flac') {
+			bitrateKbps = 900; // ~900 kbps average for FLAC
+		} else if (formatOptions.audioFormat === 'wav') {
+			const bitDepth = parseInt(formatOptions.audioBitDepth || '16', 10);
+			const sampleRate = parseInt(formatOptions.audioSampleRate || '48000', 10);
+			const bytesPerSecond = (sampleRate * bitDepth * 2) / 8;
+			return Math.round(duration * bytesPerSecond);
+		}
+
+		const estimatedBytes = Math.round((bitrateKbps * 1000 * duration) / 8 * 1.05);
+		return estimatedBytes;
+	}, [videoInfo, playlistInfo, formatOptions]);
 
 	useEffect(() => {
 		let interval: NodeJS.Timeout;
@@ -223,11 +309,33 @@ function App() {
 
 	// Parse progress from yt-dlp output
 	const parseProgress = useCallback((log: string) => {
-		// Match patterns like "[download]  45.2% of 100.00MiB"
-		const match = log.match(/\[download\]\s+(\d+\.?\d*)%/);
-		if (match) {
-			setDownloadProgress(parseFloat(match[1]));
+		// Match patterns like "[download]  45.2% of 100.00MiB at 5.00MiB/s ETA 00:10"
+		const downloadMatch = log.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\d+\.?\d*\w+)\s+at\s+(\d+\.?\d*\w+\/s)\s+ETA\s+(\S+)/i);
+		if (downloadMatch) {
+			setDownloadProgress(parseFloat(downloadMatch[1]));
+			setTotalSize(downloadMatch[2]);
+			setDownloadSpeed(downloadMatch[3]);
+			setEta(downloadMatch[4]);
+			
+			// Calculate downloaded size
+			const percent = parseFloat(downloadMatch[1]) / 100;
+			const totalMatch = downloadMatch[2].match(/(\d+\.?\d*)/);
+			if (totalMatch) {
+				const total = parseFloat(totalMatch[1]);
+				const downloaded = total * percent;
+				const unit = downloadMatch[2].replace(/[\d.]/g, '');
+				setDownloadedSize(`${downloaded.toFixed(1)}${unit}`);
+			}
+			return;
 		}
+		
+		// Match simpler pattern "[download]  45.2% of 100.00MiB"
+		const simpleMatch = log.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\d+\.?\d*\w+)/i);
+		if (simpleMatch) {
+			setDownloadProgress(parseFloat(simpleMatch[1]));
+			setTotalSize(simpleMatch[2]);
+		}
+		
 		// Also match ffmpeg conversion progress
 		const ffmpegMatch = log.match(/time=(\d+):(\d+):(\d+)/);
 		if (ffmpegMatch) {
@@ -236,9 +344,63 @@ function App() {
 		}
 	}, []);
 
+	// Fetch video info when URL changes
+	const fetchVideoInfoDebounced = useCallback(
+		(() => {
+			let timeoutId: NodeJS.Timeout | null = null;
+			return (urlToFetch: string) => {
+				if (timeoutId) {
+					clearTimeout(timeoutId);
+				}
+				timeoutId = setTimeout(async () => {
+					if (!urlToFetch || !urlToFetch.startsWith('http')) {
+						setVideoInfo(null);
+						setPlaylistInfo(null);
+						setVideoPreviewError(null);
+						return;
+					}
+
+					setVideoPreviewLoading(true);
+					setVideoPreviewError(null);
+					setVideoInfo(null);
+					setPlaylistInfo(null);
+
+					try {
+						const result = await window.electron.fetchVideoInfo(urlToFetch);
+						
+						if (result.error) {
+							setVideoPreviewError(result.error);
+						} else if (result.isPlaylist && result.playlist) {
+							setPlaylistInfo(result.playlist as PlaylistInfo);
+						} else if (result.video) {
+							setVideoInfo(result.video as VideoInfo);
+						}
+					} catch (err: any) {
+						setVideoPreviewError(err.message || 'Failed to fetch video info');
+					} finally {
+						setVideoPreviewLoading(false);
+					}
+				}, 800); // Debounce 800ms
+			};
+		})(),
+		[]
+	);
+
+	// Trigger video info fetch when URL changes
+	useEffect(() => {
+		if (url && binariesExist) {
+			setIsVideoPreviewExpanded(true); // Expand preview when URL changes
+			fetchVideoInfoDebounced(url);
+		} else {
+			setVideoInfo(null);
+			setPlaylistInfo(null);
+		}
+	}, [url, binariesExist, fetchVideoInfoDebounced]);
+
 	const checkBinaries = async () => {
 		try {
 			const result = await window.electron.checkBinaries();
+			console.log('checkBinaries result:', result);
 			// Assuming result is { ytdlp: boolean, ffmpeg: boolean, path: string }
 			const allExist = result.ytdlp && result.ffmpeg;
 			setBinariesExist(allExist);
@@ -320,7 +482,7 @@ function App() {
 		const removeCompleteListeners = window.electron.onDownloadComplete((result: DownloadResult) => {
 			setIsDownloading(false);
 			
-			if (result.message.includes('キャンセル')) {
+			if (result.message.toLowerCase().includes('cancel')) {
 				setStatus('cancelled');
 			} else {
 				setStatus(result.success ? 'complete' : 'error');
@@ -334,7 +496,7 @@ function App() {
 				const historyItem: DownloadHistoryItem = {
 					id: crypto.randomUUID(),
 					url: currentDownloadUrlRef.current,
-					title: result.title || 'タイトル不明',
+					title: result.title || '',
 					location: locationRef.current,
 					filename: result.filename || '',
 					fileSize: result.fileSize || 0,
@@ -371,10 +533,6 @@ function App() {
 	useEffect(() => {
 		localStorage.setItem('lastAdvancedOptions', JSON.stringify(advancedOptions));
 	}, [advancedOptions]);
-
-	useEffect(() => {
-		localStorage.setItem('videoConversion', JSON.stringify(videoConversion));
-	}, [videoConversion]);
 
 	useEffect(() => {
 		localStorage.setItem('favoriteFolders', JSON.stringify(favorites));
@@ -431,7 +589,7 @@ function App() {
 	const handleDownload = useCallback(() => {
 		if (!url) return;
 		if (!location) {
-			alert('保存先フォルダを選択してください。');
+			alert(t('selectDestination'));
 			return;
 		}
 
@@ -439,7 +597,13 @@ function App() {
 		setStatus('downloading');
 		setDownloadProgress(0);
 		setCurrentDownloadUrl(url);
-		setLogs(['🚀 ダウンロードプロセスを開始します...']);
+		setLogs([t('startingDownload')]);
+		
+		// Reset progress details
+		setDownloadSpeed('');
+		setDownloadedSize('');
+		setTotalSize('');
+		setEta('');
 
 		const args: string[] = [];
 		const customArgsInput = document.getElementById('custom-args') as HTMLInputElement;
@@ -452,10 +616,9 @@ function App() {
 			args: customArgs,
 			options: formatOptions,
 			advancedOptions,
-			videoConversion: formatOptions.type === 'video' ? videoConversion : undefined,
 			outputTemplate // Pass the template
 		});
-	}, [url, location, formatOptions, advancedOptions, videoConversion, outputTemplate]);
+	}, [url, location, formatOptions, advancedOptions, outputTemplate, t]);
 
 	// Keyboard shortcuts - must be after handleDownload definition
 	useEffect(() => {
@@ -481,45 +644,47 @@ function App() {
 
 	const handleUpdateBinaries = async () => {
 		setIsUpdatingBinaries(true);
-		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, status: 'yt-dlpの更新を開始...' });
+		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, status: t('startingYtDlpUpdate') });
 		setBinaryStatus(null);
-		setLogs(prev => [...prev, 'yt-dlpの更新を開始します...']);
+		setLogs(prev => [...prev, t('startingYtDlpUpdate')]);
 		const result = await window.electron.updateYtDlp();
 		setIsUpdatingBinaries(false);
 		setBinaryUpdateProgress(null);
 		if (result === true) {
-			setBinaryStatus({ message: '更新完了', type: 'success' });
-			setLogs(prev => [...prev, 'yt-dlpの更新が完了しました。']);
+			setBinaryStatus({ message: t('updateComplete'), type: 'success' });
+			setLogs(prev => [...prev, t('ytDlpUpdateComplete')]);
 			setTimeout(() => setBinaryStatus(null), 3000);
 		} else if (result === 'cancelled') {
-			setBinaryStatus({ message: 'キャンセルされました', type: 'info' });
-			setLogs(prev => [...prev, 'yt-dlpの更新がキャンセルされました。']);
+			setBinaryStatus({ message: t('updateCancelled'), type: 'info' });
+			setLogs(prev => [...prev, t('ytDlpUpdateCancelled')]);
 			setTimeout(() => setBinaryStatus(null), 3000);
 		} else {
-			setBinaryStatus({ message: '更新失敗', type: 'error' });
-			setLogs(prev => [...prev, 'yt-dlpの更新に失敗しました。']);
+			setBinaryStatus({ message: t('updateFailed'), type: 'error' });
+			setLogs(prev => [...prev, t('ytDlpUpdateFailed')]);
+			setTimeout(() => setBinaryStatus(null), 3000);
 		}
 	};
 
 	const handleUpdateFfmpeg = async () => {
 		setIsUpdatingBinaries(true);
-		setBinaryUpdateProgress({ type: 'ffmpeg', percent: 0, status: 'ffmpegの更新を開始...' });
+		setBinaryUpdateProgress({ type: 'ffmpeg', percent: 0, status: t('startingFfmpegUpdate') });
 		setBinaryStatus(null);
-		setLogs(prev => [...prev, 'ffmpegの更新を開始します...']);
+		setLogs(prev => [...prev, t('startingFfmpegUpdate')]);
 		const result = await window.electron.updateFfmpeg();
 		setIsUpdatingBinaries(false);
 		setBinaryUpdateProgress(null);
 		if (result === true) {
-			setBinaryStatus({ message: '更新完了', type: 'success' });
-			setLogs(prev => [...prev, 'ffmpegの更新が完了しました。']);
+			setBinaryStatus({ message: t('updateComplete'), type: 'success' });
+			setLogs(prev => [...prev, t('ffmpegUpdateComplete')]);
 			setTimeout(() => setBinaryStatus(null), 3000);
 		} else if (result === 'cancelled') {
-			setBinaryStatus({ message: 'キャンセルされました', type: 'info' });
-			setLogs(prev => [...prev, 'ffmpegの更新がキャンセルされました。']);
+			setBinaryStatus({ message: t('updateCancelled'), type: 'info' });
+			setLogs(prev => [...prev, t('ffmpegUpdateCancelled')]);
 			setTimeout(() => setBinaryStatus(null), 3000);
 		} else {
-			setBinaryStatus({ message: '更新失敗', type: 'error' });
-			setLogs(prev => [...prev, 'ffmpegの更新に失敗しました。']);
+			setBinaryStatus({ message: t('updateFailed'), type: 'error' });
+			setLogs(prev => [...prev, t('ffmpegUpdateFailed')]);
+			setTimeout(() => setBinaryStatus(null), 3000);
 		}
 	};
 
@@ -529,20 +694,21 @@ function App() {
 
 	const handleDownloadBinaries = async () => {
 		setIsUpdatingBinaries(true);
-		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, status: 'バイナリのダウンロードを開始...' });
+		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, status: t('startingBinaryDownload') });
 		setBinaryStatus(null);
-		setLogs(prev => [...prev, 'バイナリのダウンロードを開始します...']);
+		setLogs(prev => [...prev, t('startingBinaryDownload')]);
 		const success = await window.electron.downloadBinaries();
 		setIsUpdatingBinaries(false);
 		setBinaryUpdateProgress(null);
 		if (success) {
-			setBinaryStatus({ message: 'ダウンロード完了', type: 'success' });
-			setLogs(prev => [...prev, 'バイナリのダウンロードとセットアップが完了しました。']);
+			setBinaryStatus({ message: t('downloadComplete2'), type: 'success' });
+			setLogs(prev => [...prev, t('binaryDownloadComplete')]);
 			checkBinaries(); // Re-check status
 			setTimeout(() => setBinaryStatus(null), 3000);
 		} else {
-			setBinaryStatus({ message: 'ダウンロード失敗', type: 'error' });
-			setLogs(prev => [...prev, 'バイナリのダウンロードに失敗しました。']);
+			setBinaryStatus({ message: t('downloadFailed'), type: 'error' });
+			setLogs(prev => [...prev, t('binaryDownloadFailed')]);
+			setTimeout(() => setBinaryStatus(null), 3000);
 		}
 	};
 
@@ -568,7 +734,7 @@ function App() {
 						<button
 							onClick={() => setIsSettingsOpen(true)}
 							className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
-							title="設定"
+							title={t('settings')}
 						>
 							<SettingsIcon size={18} className={theme.icon} />
 						</button>
@@ -580,7 +746,7 @@ function App() {
 									? `${theme.button} bg-opacity-20` 
 									: 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
 							}`}
-							title="ダウンロード履歴"
+							title={t('downloadHistory')}
 						>
 							<History size={18} className={showHistory ? 'text-white' : ''} />
 						</button>
@@ -594,7 +760,7 @@ function App() {
 								className="glass-input rounded-full px-3 py-1.5 text-[10px] text-gray-300 cursor-pointer hover:bg-white/10 transition-colors appearance-none"
 								defaultValue=""
 							>
-								<option value="" disabled>プリセット</option>
+								<option value="" disabled>{t('preset')}</option>
 								{presets.map(preset => (
 									<option key={preset.id} value={preset.id} className="bg-[#111] text-white">
 										{preset.name}
@@ -607,7 +773,7 @@ function App() {
 					<h1 className={`text-3xl font-bold font-display bg-gradient-to-r ${theme.primary} ${theme.secondary} ${theme.accent} bg-clip-text text-transparent drop-shadow-2xl tracking-tight`}>
 						yt-dlp GUI
 					</h1>
-					<p className="text-gray-400 text-xs font-light tracking-wide">高機能動画ダウンローダー</p>
+					<p className="text-gray-400 text-xs font-light tracking-wide">{t('appSubtitle')}</p>
 				</motion.div>
 
 				<div className="flex-1 flex flex-col gap-6 min-h-0 overflow-y-auto custom-scrollbar pb-4">
@@ -621,18 +787,37 @@ function App() {
 							{binariesExist === false && (
 								<div className={`bg-red-500/10 border ${theme.border} text-red-400 p-3 rounded-xl flex items-center gap-3 text-xs shrink-0`}>
 									<AlertCircle size={16} />
-									<span>バイナリ (yt-dlp/ffmpeg) がアプリケーションフォルダに見つかりません。設定からダウンロードしてください。</span>
+									<span>{t('binaryNotFound')}</span>
 								</div>
 							)}
 
 							<div className="shrink-0 space-y-3">
 								<UrlInput url={url} setUrl={setUrl} theme={{ icon: theme.icon }} />
 								
+								{/* Video Preview */}
+								{url && (
+									<VideoPreview
+										url={url}
+										isLoading={videoPreviewLoading}
+										error={videoPreviewError}
+										videoInfo={videoInfo}
+										playlistInfo={playlistInfo}
+										onToggle={() => setIsVideoPreviewExpanded(!isVideoPreviewExpanded)}
+										isExpanded={isVideoPreviewExpanded}
+										theme={{
+											icon: theme.icon,
+											primary: theme.primary,
+											secondary: theme.secondary,
+											accent: theme.accent
+										}}
+									/>
+								)}
+								
 								{/* Clipboard Monitor Toggle */}
 								<div className="flex items-center justify-end px-1">
 									<div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsClipboardMonitorEnabled(!isClipboardMonitorEnabled)}>
 										<div className={`w-2 h-2 rounded-full transition-colors ${isClipboardMonitorEnabled ? `${theme.toggle} animate-pulse` : 'bg-gray-600'}`} />
-										<span className="text-xs text-gray-400 select-none">クリップボード監視</span>
+										<span className="text-xs text-gray-400 select-none">{t('clipboardMonitoring')}</span>
 										<div className={`relative w-8 h-4 rounded-full transition-colors duration-200 ${isClipboardMonitorEnabled ? theme.toggleBg : 'bg-white/10'}`}>
 											<div
 												className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full transition-transform duration-200 ${isClipboardMonitorEnabled ? `translate-x-4 ${theme.toggle}` : 'bg-gray-400'}`}
@@ -646,8 +831,6 @@ function App() {
 								<FormatSelector 
 									options={formatOptions} 
 									setOptions={setFormatOptions}
-									videoConversion={videoConversion}
-									setVideoConversion={setVideoConversion}
 									theme={{
 										tabActive: theme.activeTab.split(' ')[0],
 										tabActiveText: theme.activeTab.split(' ')[1],
@@ -657,6 +840,7 @@ function App() {
 										toggleTrack: theme.toggleBg,
 										icon: theme.icon
 									}}
+									estimatedSize={estimatedSize}
 								/>
 								<div className="space-y-4">
 									<LocationSelector
@@ -686,12 +870,12 @@ function App() {
 										<details className="group">
 											<summary className="flex items-center gap-2 text-[10px] font-medium text-gray-400 cursor-pointer hover:text-white transition-colors select-none">
 												<Terminal size={12} />
-												カスタム引数
+												{t('customArgs')}
 											</summary>
 											<div className="mt-1">
 												<input
 													type="text"
-													placeholder="--embed-subs --write-auto-sub ..."
+													placeholder={t('customArgsPlaceholder')}
 													className="w-full glass-input rounded-xl px-3 py-2 text-[10px] text-gray-300 placeholder-gray-600"
 													id="custom-args"
 												/>
@@ -729,13 +913,13 @@ function App() {
 											{isDownloading ? (
 												<>
 													<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-													処理中... {downloadProgress > 0 && `${downloadProgress.toFixed(1)}%`}
+													{t('processing')} {downloadProgress > 0 && `${downloadProgress.toFixed(1)}%`}
 												</>
 											) : (
 												<>
 													<Download size={18} />
-													ダウンロード開始
-													<span className="text-xs opacity-60 ml-1">(⌘+Enter)</span>
+													{t('startDownload')}
+													<span className="text-xs opacity-60 ml-1">({isMac ? '⌘' : 'Ctrl'}+Enter)</span>
 												</>
 											)}
 										</span>
@@ -750,12 +934,49 @@ function App() {
 											whileTap={{ scale: 0.95 }}
 											onClick={handleCancelVideoDownload}
 											className="px-4 rounded-2xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/20 flex items-center justify-center"
-											title="キャンセル"
+											title={t('cancel')}
 										>
 											<XCircle size={20} />
 										</motion.button>
 									)}
 								</div>
+
+								{/* Download Progress Details */}
+								<AnimatePresence>
+									{isDownloading && (downloadSpeed || downloadedSize || eta) && (
+										<motion.div
+											initial={{ opacity: 0, height: 0 }}
+											animate={{ opacity: 1, height: 'auto' }}
+											exit={{ opacity: 0, height: 0 }}
+											className="overflow-hidden"
+										>
+											<div className="glass rounded-xl p-3 flex items-center justify-between text-xs">
+												<div className="flex items-center gap-4">
+													{downloadSpeed && (
+														<div className="flex items-center gap-1.5">
+															<Zap size={12} className="text-yellow-400" />
+															<span className="text-gray-400">{t('downloadSpeed')}:</span>
+															<span className="text-white font-medium">{downloadSpeed}</span>
+														</div>
+													)}
+													{downloadedSize && totalSize && (
+														<div className="flex items-center gap-1.5">
+															<Download size={12} className="text-emerald-400" />
+															<span className="text-gray-400">{t('downloadedSize')}:</span>
+															<span className="text-white font-medium">{downloadedSize} / {totalSize}</span>
+														</div>
+													)}
+												</div>
+												{eta && eta !== 'Unknown' && (
+													<div className="flex items-center gap-1.5">
+														<span className="text-gray-400">{t('remainingTime')}:</span>
+														<span className="text-white font-medium">{eta}</span>
+													</div>
+												)}
+											</div>
+										</motion.div>
+									)}
+								</AnimatePresence>
 
 								{/* Console Toggle & Output */}
 								<div className="space-y-2">
@@ -765,7 +986,7 @@ function App() {
 											className="flex items-center gap-2 text-xs text-gray-400 hover:text-white transition-colors"
 										>
 											<Terminal size={12} />
-											<span>コンソール出力</span>
+											<span>{t('consoleOutput')}</span>
 											<motion.div
 												animate={{ rotate: showConsole ? 180 : 0 }}
 												transition={{ duration: 0.2 }}
@@ -788,9 +1009,10 @@ function App() {
 														<StatusToast
 															status={status}
 															message={
-																status === 'complete' ? 'ダウンロードが完了しました！' :
-																status === 'downloading' ? 'ダウンロード中です...' :
-																'ダウンロードに失敗しました。ログを確認してください。'
+																status === 'complete' ? t('downloadCompleteMsg') :
+																status === 'downloading' ? t('downloadingMsg') :
+																status === 'cancelled' ? t('cancelledMsg') :
+																t('downloadErrorMsg')
 															}
 															onClose={() => setStatus('idle')}
 														/>
@@ -813,7 +1035,7 @@ function App() {
 														<button
 															onClick={() => setLogs([])}
 															className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-colors"
-															title="ログをクリア"
+															title={t('clearLogs')}
 														>
 															<X size={12} />
 														</button>
@@ -825,14 +1047,20 @@ function App() {
 														{logs.length === 0 ? (
 															<div className="h-full flex flex-col items-center justify-center text-gray-600 gap-2 opacity-50">
 																<Terminal size={16} />
-																<span>待機中...</span>
+																<span>{t('waiting')}</span>
 															</div>
 														) : (
 															<>
 																{logs.map((log, i) => (
-																	<div key={i} className="break-all border-l-2 border-transparent hover:border-white/20 pl-2 transition-colors leading-relaxed">
+																	<motion.div 
+																		key={i} 
+																		initial={{ opacity: 0, y: -3 }}
+																		animate={{ opacity: 1, y: 0 }}
+																		transition={{ duration: 0.15, ease: "easeOut" }}
+																		className="break-all border-l-2 border-transparent hover:border-white/20 pl-2 transition-colors leading-relaxed"
+																	>
 																		{log}
-																	</div>
+																	</motion.div>
 																))}
 																<div ref={logsEndRef} />
 															</>

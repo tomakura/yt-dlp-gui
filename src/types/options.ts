@@ -1,5 +1,7 @@
 export type FormatType = 'video' | 'audio';
 
+export type HwEncoder = 'auto' | 'none' | 'nvenc' | 'qsv' | 'videotoolbox' | 'amf';
+
 export interface FormatOptions {
   type: FormatType;
   videoContainer: string;
@@ -16,6 +18,7 @@ export interface VideoConversionOptions {
   videoBitrate: string;
   audioCodec: 'copy' | 'aac' | 'mp3' | 'opus';
   audioBitrate: string;
+  hwEncoder: HwEncoder;
 }
 
 export interface AdvancedOptionsState {

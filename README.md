@@ -1,82 +1,50 @@
 # yt-dlp GUI
 
-モダンで使いやすい `yt-dlp` のクロスプラットフォーム GUI フロントエンドです。
-コマンドライン操作が苦手な方でも、高機能な動画ダウンローダーである `yt-dlp` の機能を簡単に利用できます。
+[日本語](#日本語) | [English](#english)
 
-![App Screenshot](https://via.placeholder.com/800x500?text=yt-dlp+GUI+Screenshot)
-*(スクリーンショットをここに貼ってください)*
+---
+
+## 日本語
+
+モダンで使いやすい `yt-dlp` のクロスプラットフォーム GUI フロントエンドです。
 
 ## ✨ 主な機能
 
-*   **モダンなユーザーインターフェース**: 直感的で美しいデザイン（Electron + React + Tailwind CSS）。
-*   **テーマ切り替え**: Midnight, Cyberpunk, Ocean, Forest など、気分に合わせてテーマを変更可能。
+*   **モダンなユーザーインターフェース**: 直感的で美しいデザイン
+*   **多言語対応**: 日本語・英語
+*   **テーマ切り替え**: Midnight, Cyberpunk, Ocean, Forest
+*   **動画情報プレビュー**: 
+    *   URLを入力すると即座にサムネイル、タイトル、チャンネル名を表示
+    *   利用可能な最高画質を表示
+    *   プレイリストのギャラリー風ナビゲーション
+    *   推定ダウンロードサイズの表示（解像度・ビットレートに応じて自動計算）
 *   **動画・音声ダウンロード**:
-    *   動画形式: MP4, WebM, MKV など
-    *   音声形式: MP3, M4A, WAV, FLAC など
-    *   解像度選択: 4K, 1080p, 720p, 最高画質など
+    *   動画形式: MP4, WebM, MKV
+    *   音声形式: MP3, M4A, AAC, WAV, FLAC
+    *   解像度選択: 4K, 1440p, 1080p, 720p, 480p, 360p
+*   **ダウンロード進捗の詳細表示**:
+    *   ダウンロード速度 (MB/s)
+    *   ダウンロード済みサイズ / 総サイズ
+    *   残り時間 (ETA)
 *   **高度なオプション**:
     *   サムネイルの埋め込み
-    *   メタデータ（タイトル、アーティスト等）の追加
+    *   メタデータの追加
     *   字幕のダウンロードと埋め込み
     *   チャプター分割
-    *   Cookieを使用したブラウザ連携（プレミアム会員限定動画など）
-*   **バイナリ自動管理**: `yt-dlp` と `ffmpeg` をアプリ内から自動でダウンロード・更新できます。バージョン情報の確認も可能です。
+    *   Cookieを使用したブラウザ連携
+*   **バイナリ自動管理**: `yt-dlp` と `ffmpeg` をアプリ内から自動でダウンロード・更新
 *   **便利な機能**:
-    *   クリップボード監視（URLをコピーするだけで自動入力）
-    *   ダウンロード履歴の保存と管理
-    *   よく使う設定を保存できる「プリセット」機能
-    *   お気に入り保存先フォルダの登録
-    *   アプリ自体の更新確認機能
-    *   ダウンロードのキャンセル機能
+    *   クリップボード監視
+    *   ダウンロード履歴
+    *   プリセット機能
+    *   お気に入りフォルダ
 
 ## 📦 インストール
 
-[Releases](https://github.com/tomakura/yt-dlp-gui/releases) ページから、お使いの OS に合わせたインストーラーをダウンロードしてください。
+[Releases](https://github.com/tomakura/yt-dlp-gui/releases) ページからダウンロード
 
-*   **macOS**: `.dmg` (Universal - Intel / Apple Silicon 両対応)
-*   **Windows**: `.exe` (インストーラー版 または ポータブル版)
-
-## 🛠 開発者向け情報
-
-このプロジェクトは以下の技術スタックで構築されています。
-
-*   [Electron](https://www.electronjs.org/)
-*   [React](https://react.dev/)
-*   [TypeScript](https://www.typescriptlang.org/)
-*   [Vite](https://vitejs.dev/)
-*   [Tailwind CSS](https://tailwindcss.com/)
-*   [Framer Motion](https://www.framer.com/motion/) (アニメーション)
-
-### セットアップ
-
-1.  リポジトリをクローンします。
-    ```bash
-    git clone https://github.com/tomakura/yt-dlp-gui.git
-    cd yt-dlp-gui
-    ```
-
-2.  依存関係をインストールします。
-    ```bash
-    npm install
-    ```
-
-3.  開発サーバーを起動します。
-    ```bash
-    npm run dev
-    ```
-
-### ビルド
-
-本番用のアプリケーション（インストーラー）を作成するには以下のコマンドを実行します。
-
-```bash
-# macOS と Windows 両方のビルド (macOS上で実行する場合)
-npm run electron:build -- --mac --win
-
-# 個別のビルド
-npm run electron:build -- --mac
-npm run electron:build -- --win
-```
+*   **macOS**: `.dmg` (Universal)
+*   **Windows**: `.exe`
 
 ## 📝 ライセンス
 
@@ -84,8 +52,58 @@ npm run electron:build -- --win
 
 ## 🙏 クレジット
 
-このアプリケーションは以下の素晴らしいオープンソースプロジェクトを利用しています。
+*   [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+*   [FFmpeg](https://ffmpeg.org/)
 
-*   [yt-dlp](https://github.com/yt-dlp/yt-dlp): 動画ダウンロードのコア機能
-*   [FFmpeg](https://ffmpeg.org/): 動画・音声の変換処理
+---
 
+## English
+
+A modern and user-friendly cross-platform GUI frontend for `yt-dlp`.
+
+## ✨ Features
+
+*   **Modern UI**: Intuitive and beautiful design
+*   **Multi-language**: Japanese and English
+*   **Themes**: Midnight, Cyberpunk, Ocean, Forest
+*   **Video Info Preview**:
+    *   Instant thumbnail, title, and channel display
+    *   Shows best available quality
+    *   Gallery navigation for playlists
+    *   Estimated download size (auto-calculated by resolution/bitrate)
+*   **Video & Audio Download**:
+    *   Video: MP4, WebM, MKV
+    *   Audio: MP3, M4A, AAC, WAV, FLAC
+    *   Resolution: 4K, 1440p, 1080p, 720p, 480p, 360p
+*   **Download Progress**:
+    *   Speed (MB/s)
+    *   Downloaded / Total size
+    *   ETA
+*   **Advanced Options**:
+    *   Embed thumbnails
+    *   Add metadata
+    *   Subtitle embedding
+    *   Chapter splitting
+    *   Browser cookie integration
+*   **Binary Management**: Auto-download and update `yt-dlp` and `ffmpeg`
+*   **Convenience**:
+    *   Clipboard monitoring
+    *   Download history
+    *   Presets
+    *   Favorite folders
+
+## 📦 Installation
+
+Download from [Releases](https://github.com/tomakura/yt-dlp-gui/releases)
+
+*   **macOS**: `.dmg` (Universal)
+*   **Windows**: `.exe`
+
+## 📝 License
+
+[MIT License](LICENSE)
+
+## 🙏 Credits
+
+*   [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+*   [FFmpeg](https://ffmpeg.org/)

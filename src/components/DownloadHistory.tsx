@@ -2,6 +2,7 @@ import React from 'react';
 import { History, Folder, Trash2, ExternalLink, Clock, HardDrive, CheckCircle, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DownloadHistoryItem } from '../types/options';
+import { useI18n } from '../i18n';
 
 interface DownloadHistoryProps {
   history: DownloadHistoryItem[];
@@ -14,8 +15,10 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   onClearHistory,
   onRemoveItem
 }) => {
+  const { t, language } = useI18n();
+  
   const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '不明';
+    if (bytes === 0) return t('unknown');
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -28,14 +31,16 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
     const diff = now.getTime() - date.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     
+    const locale = language === 'ja' ? 'ja-JP' : 'en-US';
+    
     if (days === 0) {
-      return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
     } else if (days === 1) {
-      return '昨日';
+      return t('yesterday');
     } else if (days < 7) {
-      return `${days}日前`;
+      return t('daysAgo').replace('{days}', String(days));
     } else {
-      return date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
+      return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
     }
   };
 
@@ -55,11 +60,11 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-gray-200">
           <History size={16} className="text-blue-400" />
-          ダウンロード履歴
+          {t('downloadHistory')}
         </div>
         <div className="text-center py-8 text-gray-600 text-xs border border-dashed border-white/10 rounded-xl">
           <History size={24} className="mx-auto mb-2 opacity-50" />
-          履歴はありません
+          {t('noHistory')}
         </div>
       </div>
     );
@@ -70,15 +75,15 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-semibold text-gray-200">
           <History size={16} className="text-blue-400" />
-          ダウンロード履歴
-          <span className="text-[10px] text-gray-500 font-normal">({history.length}件)</span>
+          {t('downloadHistory')}
+          <span className="text-[10px] text-gray-500 font-normal">({history.length} {t('items')})</span>
         </div>
         <button
           onClick={onClearHistory}
           className="text-[10px] text-gray-500 hover:text-red-400 transition-colors flex items-center gap-1"
         >
           <Trash2 size={12} />
-          すべて削除
+          {t('clearHistory')}
         </button>
       </div>
 
@@ -101,7 +106,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       <XCircle size={12} className="text-red-400 shrink-0" />
                     )}
                     <span className="text-xs text-gray-200 truncate font-medium">
-                      {item.title || 'タイトル不明'}
+                      {item.title || t('titleUnknown')}
                     </span>
                   </div>
                   
@@ -125,7 +130,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                         ? 'bg-purple-500/20 text-purple-300' 
                         : 'bg-blue-500/20 text-blue-300'
                     }`}>
-                      {item.format === 'video' ? '動画' : '音声'}
+                      {item.format === 'video' ? t('video') : t('audio')}
                     </span>
                   </div>
                 </div>
@@ -135,7 +140,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     <button
                       onClick={() => openFolder(item.filename)}
                       className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-blue-400 transition-colors"
-                      title="フォルダを開く"
+                      title={t('openFolder')}
                     >
                       <ExternalLink size={12} />
                     </button>
@@ -143,7 +148,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                   <button
                     onClick={() => onRemoveItem(item.id)}
                     className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-red-400 transition-colors"
-                    title="履歴から削除"
+                    title={t('removeFromHistory')}
                   >
                     <Trash2 size={12} />
                   </button>

@@ -19,6 +19,7 @@
     "directories": {
       "output": "release"
     },
+    "icon": "build/icon.png",
     "files": [
       "dist",
       "dist-electron",
@@ -42,20 +43,8 @@
       "identity": null
     },
     "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
+      "target": "nsis",
+      "artifactName": "${productName} Setup ${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [

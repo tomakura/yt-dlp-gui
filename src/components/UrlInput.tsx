@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link2, ClipboardPaste } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 interface Theme {
   icon: string;
@@ -12,6 +13,7 @@ interface UrlInputProps {
 }
 
 export const UrlInput: React.FC<UrlInputProps> = ({ url, setUrl, theme }) => {
+  const { t } = useI18n();
   const themeStyles = theme || {
     icon: 'text-blue-400'
   };
@@ -29,7 +31,7 @@ export const UrlInput: React.FC<UrlInputProps> = ({ url, setUrl, theme }) => {
     <div className="space-y-2">
       <label className="text-xs text-gray-400 flex items-center gap-2">
         <Link2 size={14} className={themeStyles.icon} />
-        ダウンロードURL
+        {t('downloadUrl')}
       </label>
       <div className="flex gap-2">
         <div className="flex items-center gap-2 flex-1 glass-input rounded-xl px-3 py-2">
@@ -37,7 +39,7 @@ export const UrlInput: React.FC<UrlInputProps> = ({ url, setUrl, theme }) => {
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.youtube.com/watch?v=..."
+            placeholder={t('urlPlaceholder')}
             className="bg-transparent border-none outline-none text-sm text-white placeholder-gray-600 w-full"
           />
         </div>
@@ -48,7 +50,7 @@ export const UrlInput: React.FC<UrlInputProps> = ({ url, setUrl, theme }) => {
         >
           <div className="flex items-center gap-1">
             <ClipboardPaste size={14} />
-            貼り付け
+            {t('paste')}
           </div>
         </button>
       </div>

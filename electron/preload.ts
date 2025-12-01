@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DownloadPayload, DownloadResult, BinaryUpdateProgress } from '../src/types/electron';
+import type { DownloadPayload, DownloadResult, BinaryUpdateProgress, VideoInfoResult, HwEncoderResult } from '../src/types/electron';
 
 contextBridge.exposeInMainWorld('electron', {
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
@@ -32,4 +32,6 @@ contextBridge.exposeInMainWorld('electron', {
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   downloadBinaries: () => ipcRenderer.invoke('download-binaries'),
   openFolder: (folderPath: string) => ipcRenderer.send('open-folder', folderPath),
+  fetchVideoInfo: (url: string): Promise<VideoInfoResult> => ipcRenderer.invoke('fetch-video-info', url),
+  detectHwEncoders: (): Promise<HwEncoderResult> => ipcRenderer.invoke('detect-hw-encoders'),
 });

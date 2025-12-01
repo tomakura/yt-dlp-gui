@@ -25,6 +25,53 @@ export interface BinaryUpdateProgress {
   status: string;
 }
 
+export interface VideoInfoResult {
+  isPlaylist: boolean;
+  video?: {
+    id: string;
+    title: string;
+    channel: string;
+    channelUrl?: string;
+    thumbnail: string;
+    duration: number;
+    viewCount?: number;
+    uploadDate?: string;
+    description?: string;
+    filesize?: number;
+    formats?: {
+      format_id: string;
+      ext: string;
+      resolution?: string;
+      filesize?: number;
+      filesize_approx?: number;
+      vcodec?: string;
+      acodec?: string;
+      tbr?: number;
+    }[];
+  };
+  playlist?: {
+    id: string;
+    title: string;
+    channel: string;
+    thumbnail?: string;
+    videoCount: number;
+    entries: {
+      id: string;
+      title: string;
+      channel: string;
+      thumbnail: string;
+      duration: number;
+      viewCount?: number;
+      filesize?: number;
+    }[];
+  };
+  error?: string;
+}
+
+export interface HwEncoderResult {
+  available: ('nvenc' | 'qsv' | 'videotoolbox' | 'amf')[];
+}
+
 declare global {
   interface Window {
     electron: {
@@ -44,9 +91,9 @@ declare global {
       openExternal: (url: string) => Promise<void>;
       downloadBinaries: () => Promise<boolean>;
       openFolder: (folderPath: string) => void;
+      fetchVideoInfo: (url: string) => Promise<VideoInfoResult>;
+      detectHwEncoders: () => Promise<HwEncoderResult>;
     };
-  }
-}
   }
 }
 

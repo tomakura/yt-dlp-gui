@@ -1,5 +1,6 @@
 import React from 'react';
 import { CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 export type Status = 'idle' | 'downloading' | 'complete' | 'error' | 'cancelled';
 
@@ -22,12 +23,18 @@ export const StatusToast: React.FC<StatusToastProps> = ({ status, message, onClo
           : { color: 'text-red-300', bg: 'bg-red-500/10', border: 'border-red-500/20', Icon: XCircle };
 
   return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${tone.bg} ${tone.border} ${tone.color} text-xs`}>
+    <motion.div 
+      key={message}
+      initial={{ opacity: 0, y: -5 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
+      className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${tone.bg} ${tone.border} ${tone.color} text-xs`}
+    >
       <tone.Icon size={16} className={status === 'downloading' ? 'animate-spin' : ''} />
       <span className="flex-1">{message}</span>
       <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
         ✕
       </button>
-    </div>
+    </motion.div>
   );
 };

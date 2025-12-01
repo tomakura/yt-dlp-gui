@@ -1,6 +1,7 @@
 import React from 'react';
 import { Settings2 } from 'lucide-react';
 import type { AdvancedOptionsState, FormatOptions } from '../types/options';
+import { useI18n } from '../i18n';
 
 interface Theme {
   toggleActive: string;
@@ -59,6 +60,7 @@ const Toggle: React.FC<{
 };
 
 export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({ options, setOptions, formatType, theme }) => {
+  const { t } = useI18n();
   const update = <K extends keyof AdvancedOptionsState>(key: K, value: AdvancedOptionsState[K]) =>
     setOptions({ ...options, [key]: value });
 
@@ -74,59 +76,59 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({ options, setOp
     <div className="space-y-3 glass rounded-2xl p-4">
       <div className="flex items-center gap-2 text-sm font-semibold text-gray-200">
         <Settings2 size={16} className={themeStyles.icon} />
-        詳細オプション
+        {t('advancedOptions')}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <Toggle label="サムネイルを埋め込み" checked={options.embedThumbnail} onChange={(v) => update('embedThumbnail', v)} theme={themeStyles} />
-        <Toggle label="メタデータを埋め込み" checked={options.addMetadata} onChange={(v) => update('addMetadata', v)} theme={themeStyles} />
+        <Toggle label={t('embedThumbnail')} checked={options.embedThumbnail} onChange={(v) => update('embedThumbnail', v)} theme={themeStyles} />
+        <Toggle label={t('embedMetadata')} checked={options.addMetadata} onChange={(v) => update('addMetadata', v)} theme={themeStyles} />
         <Toggle 
-          label="字幕を埋め込み" 
+          label={t('embedSubtitles')} 
           checked={options.embedSubs} 
           onChange={(v) => update('embedSubs', v)} 
           disabled={isAudioMode}
-          tooltip={isAudioMode ? '音声モードでは利用できません' : undefined}
+          tooltip={isAudioMode ? t('audioModeWarning') : undefined}
           theme={themeStyles}
         />
         <Toggle 
-          label="自動字幕を書き出し" 
+          label={t('writeAutoSubtitles')} 
           checked={options.writeAutoSub} 
           onChange={(v) => update('writeAutoSub', v)}
           disabled={isAudioMode}
-          tooltip={isAudioMode ? '音声モードでは利用できません' : undefined}
+          tooltip={isAudioMode ? t('audioModeWarning') : undefined}
           theme={themeStyles}
         />
         <Toggle 
-          label="チャプターで分割" 
+          label={t('splitChapters')} 
           checked={options.splitChapters} 
           onChange={(v) => update('splitChapters', v)}
           disabled={isAudioMode}
-          tooltip={isAudioMode ? '音声モードでは利用できません' : undefined}
+          tooltip={isAudioMode ? t('audioModeWarning') : undefined}
           theme={themeStyles}
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <label className="text-[11px] text-gray-400">プレイリスト</label>
+          <label className="text-[11px] text-gray-400">{t('playlist')}</label>
           <select
             value={options.playlist}
             onChange={(e) => update('playlist', e.target.value as AdvancedOptionsState['playlist'])}
             className="w-full glass-input rounded-xl px-3 py-2 text-xs text-gray-200 bg-[#0b0b0b]"
           >
-            <option value="default">自動</option>
-            <option value="single">単体のみ</option>
-            <option value="all">プレイリスト全て</option>
+            <option value="default">{t('playlistAuto')}</option>
+            <option value="single">{t('playlistSingle')}</option>
+            <option value="all">{t('playlistAll')}</option>
           </select>
         </div>
         <div className="space-y-1">
-          <label className="text-[11px] text-gray-400">ブラウザCookie</label>
+          <label className="text-[11px] text-gray-400">{t('browserCookies')}</label>
           <select
             value={options.cookiesBrowser}
             onChange={(e) => update('cookiesBrowser', e.target.value as AdvancedOptionsState['cookiesBrowser'])}
             className="w-full glass-input rounded-xl px-3 py-2 text-xs text-gray-200 bg-[#0b0b0b]"
           >
-            <option value="none">使用しない</option>
+            <option value="none">{t('cookiesNone')}</option>
             <option value="chrome">Chrome</option>
             <option value="firefox">Firefox</option>
           </select>
@@ -135,7 +137,7 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({ options, setOp
 
       {isAudioMode && (
         <p className="text-[11px] text-gray-500">
-          ⚠️ 音声モードでは、字幕埋め込み・自動字幕・チャプター分割は利用できません。
+          ⚠️ {t('audioModeWarning')}
         </p>
       )}
     </div>

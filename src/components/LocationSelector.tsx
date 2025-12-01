@@ -1,5 +1,6 @@
 import React from 'react';
 import { FolderOpen, Star, X } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 interface Theme {
   icon: string;
@@ -22,6 +23,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
   onToggleFavorite,
   theme
 }) => {
+  const { t } = useI18n();
   const themeStyles = theme || {
     icon: 'text-green-400',
     activeTab: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
@@ -51,14 +53,14 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
     <div className="space-y-2">
       <label className="text-xs text-gray-400 flex items-center gap-2">
         <FolderOpen size={14} className={themeStyles.icon} />
-        保存先
+        {t('saveTo')}
       </label>
       <div className="flex gap-2">
         <input
           type="text"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
-          placeholder="フォルダパスを入力"
+          placeholder={t('folderPathPlaceholder')}
           className="flex-1 glass-input rounded-xl px-3 py-2 text-sm text-gray-200 bg-transparent"
         />
         <button
@@ -66,7 +68,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
           onClick={handleBrowse}
           className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:bg-white/10 transition-colors"
         >
-          参照
+          {t('browse')}
         </button>
         <button
           type="button"
@@ -77,7 +79,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
               ? 'bg-yellow-500/20 border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/30' 
               : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'
           } disabled:opacity-50 disabled:cursor-not-allowed`}
-          title={isFavorite ? 'お気に入りから削除' : 'お気に入りに追加'}
+          title={isFavorite ? t('removeFromFavorites') : t('addToFavorites')}
         >
           <Star size={14} fill={isFavorite ? 'currentColor' : 'none'} />
         </button>
