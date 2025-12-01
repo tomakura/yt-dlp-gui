@@ -43,8 +43,11 @@
 
 [Releases](https://github.com/tomakura/yt-dlp-gui/releases) ページからダウンロード
 
-*   **macOS**: `.dmg` (Universal)
-*   **Windows**: `.exe`
+*   **macOS**: `.dmg` (Universal - Intel/Apple Silicon両対応)
+*   **Windows x64**: `.exe` (一般的な64ビットPC)
+*   **Windows ARM64**: `.exe` (Surface Pro X, Snapdragon搭載PC)
+
+> **Note**: 初回起動時に `yt-dlp` と `ffmpeg` が自動でダウンロードされます。
 
 ## 📝 ライセンス
 
@@ -96,8 +99,11 @@ A modern and user-friendly cross-platform GUI frontend for `yt-dlp`.
 
 Download from [Releases](https://github.com/tomakura/yt-dlp-gui/releases)
 
-*   **macOS**: `.dmg` (Universal)
-*   **Windows**: `.exe`
+*   **macOS**: `.dmg` (Universal - Intel/Apple Silicon)
+*   **Windows x64**: `.exe` (Standard 64-bit PCs)
+*   **Windows ARM64**: `.exe` (Surface Pro X, Snapdragon PCs)
+
+> **Note**: `yt-dlp` and `ffmpeg` are automatically downloaded on first launch.
 
 ## 📝 License
 

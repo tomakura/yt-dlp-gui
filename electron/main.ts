@@ -702,15 +702,17 @@ ipcMain.handle('get-binary-versions', async () => {
 
   if (ytDlpPath) {
     try {
-      // Use spawnSync for more reliable execution on Windows
+      // Don't use shell: true on macOS as it can cause issues with paths
       const result = spawnSync(ytDlpPath, ['--version'], {
         windowsHide: true,
-        shell: true,
+        shell: isWindows, // Only use shell on Windows
         encoding: 'utf-8',
         timeout: 10000
       });
       if (result.status === 0 && result.stdout) {
         ytDlpVersion = result.stdout.trim();
+      } else if (result.stderr) {
+        console.error('yt-dlp version stderr:', result.stderr);
       }
     } catch (e) {
       console.error('Error getting yt-dlp version:', e);
@@ -721,7 +723,7 @@ ipcMain.handle('get-binary-versions', async () => {
     try {
       const result = spawnSync(ffmpegPath, ['-version'], {
         windowsHide: true,
-        shell: true,
+        shell: isWindows, // Only use shell on Windows
         encoding: 'utf-8',
         timeout: 10000
       });
@@ -939,6 +941,8 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     '--print', 'title',
     // Use default player client to avoid SABR streaming issues
     '--extractor-args', 'youtube:player_client=default',
+    // Force UTF-8 encoding for consistent output on Windows
+    '--encoding', 'utf-8',
   ];
 
   if (ffmpegPath && ffmpegPath !== 'ffmpeg') {
@@ -1101,9 +1105,12 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   isDownloadCancelled = false;
   
   // Provide Node.js path to yt-dlp for JavaScript runtime support
-  const spawnEnv = {
+  // On Windows, set PYTHONIOENCODING to utf-8 to avoid encoding issues
+  const spawnEnv: NodeJS.ProcessEnv = {
     ...process.env,
-    PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}`
+    PATH: `${path.dirname(process.execPath)}${isWindows ? ';' : ':'}${process.env.PATH || ''}`,
+    PYTHONIOENCODING: 'utf-8',
+    PYTHONUTF8: '1'
   };
   
   activeDownloadProcess = spawn(ytdlpPath, args, { 
@@ -1241,13 +1248,21 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
       '--flat-playlist', // Don't download playlist videos, just get info
       '--no-warnings',
       '--extractor-args', 'youtube:player_client=default',
+      '--encoding', 'utf-8',
     ];
+
+    // Set encoding environment variables for Windows
+    const spawnEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1'
+    };
 
     const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
       let stdout = '';
       let stderr = '';
       
-      const proc = spawn(ytdlpPath, args, { windowsHide: true });
+      const proc = spawn(ytdlpPath, args, { windowsHide: true, env: spawnEnv });
       
       proc.stdout?.setEncoding('utf8');
       proc.stdout?.on('data', (data: string) => {
