@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import { X, Save, FolderOpen, Plus, Trash2, Film, Music, Terminal, Palette, Layout, Monitor, HardDrive, Settings as SettingsIcon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Save, FolderOpen, Plus, Trash2, Film, Music, Terminal, Palette, Layout, Monitor, HardDrive, Settings as SettingsIcon, Download, XCircle, Info, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Preset } from '../types/Preset';
+import { BinaryUpdateProgress } from '../types/electron';
 
 interface SettingsModalProps {
 	isOpen: boolean;
@@ -14,14 +16,18 @@ interface SettingsModalProps {
 	binariesExist: boolean | null;
 	onUpdateBinaries: () => void;
 	onUpdateFfmpeg: () => void;
+	onCancelDownload: () => void;
 	onDownloadBinaries: () => void;
 	binaryStatus: { message: string; type: 'info' | 'success' | 'error' } | null;
+	binaryUpdateProgress: BinaryUpdateProgress | null;
 	currentTheme: any;
 	setTheme: (theme: any) => void;
 	themes: any;
+	binaryVersions: { ytDlp: string; ffmpeg: string } | null;
+	latestBinaryVersions: { ytDlp: string; ffmpeg: string } | null;
 }
 
-type Tab = 'general' | 'appearance' | 'binaries' | 'presets';
+type Tab = 'general' | 'appearance' | 'binaries' | 'presets' | 'info';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
 	isOpen,
@@ -34,14 +40,79 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	binariesExist,
 	onUpdateBinaries,
 	onUpdateFfmpeg,
+	onCancelDownload,
 	onDownloadBinaries,
 	binaryStatus,
+	binaryUpdateProgress,
 	currentTheme,
 	setTheme,
-	themes
+	themes,
+	binaryVersions,
+	latestBinaryVersions
 }) => {
-	const [newPresetName, setNewPresetName] = useState('');
 	const [activeTab, setActiveTab] = useState<Tab>('general');
+	const [newPresetName, setNewPresetName] = useState('');
+	const [appUpdateStatus, setAppUpdateStatus] = useState<{
+		checking: boolean;
+		available: boolean | null;
+		version?: string;
+		url?: string;
+		message?: string;
+	} | null>(null);
+
+	const handleCheckAppUpdate = async () => {
+		setAppUpdateStatus({ checking: true, available: null });
+		try {
+			const result = await window.electron.checkAppUpdate();
+			if (result.error) {
+				setAppUpdateStatus({ checking: false, available: null, message: result.error });
+			} else {
+				setAppUpdateStatus({ 
+					checking: false, 
+					available: result.available, 
+					version: result.latestVersion, 
+					url: result.url,
+					message: result.available ? `新しいバージョン v${result.latestVersion} が利用可能です` : '最新バージョンを使用中です'
+				});
+			}
+		} catch (e) {
+			setAppUpdateStatus({ checking: false, available: null, message: '確認中にエラーが発生しました' });
+		}
+	};
+
+	// Reset update status when modal opens/closes or tab changes if desired
+	// For now, keep it simple.
+
+	const activeTheme = themes[currentTheme];
+
+	// Handle ESC key to close modal
+	useEffect(() => {
+		if (!isOpen) return;
+		
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				e.stopPropagation();
+				e.stopImmediatePropagation();
+				onClose();
+			}
+		};
+		
+		// Use capture phase with higher priority
+		document.addEventListener('keydown', handleKeyDown, { capture: true });
+		return () => document.removeEventListener('keydown', handleKeyDown, { capture: true });
+	}, [isOpen, onClose]);
+
+	// Reset state when modal closes
+	useEffect(() => {
+		if (!isOpen) {
+			// Small delay to allow animation to complete
+			const timer = setTimeout(() => {
+				setActiveTab('general');
+			}, 300);
+			return () => clearTimeout(timer);
+		}
+	}, [isOpen]);
 
 	const handleSave = () => {
 		if (newPresetName.trim()) {
@@ -50,32 +121,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 		}
 	};
 
+	const handleClose = () => {
+		onClose();
+	};
+
 	const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
 		{ id: 'general', label: '一般', icon: SettingsIcon },
 		{ id: 'appearance', label: '外観', icon: Palette },
 		{ id: 'binaries', label: 'バイナリ', icon: Terminal },
 		{ id: 'presets', label: 'プリセット', icon: FolderOpen },
+		{ id: 'info', label: '情報', icon: Info },
 	];
 
-	return (
+	// Use portal to render modal at document body level
+	const modalContent = (
 		<AnimatePresence>
 			{isOpen && (
-				<>
+				<motion.div
+					key="settings-modal-container"
+					initial={{ opacity: 0 }}
+					animate={{ opacity: 1 }}
+					exit={{ opacity: 0, pointerEvents: 'none' }}
+					transition={{ duration: 0.2 }}
+					className="fixed inset-0 z-[60] pointer-events-none"
+				>
 					{/* Backdrop */}
 					<motion.div
 						initial={{ opacity: 0 }}
 						animate={{ opacity: 1 }}
-						exit={{ opacity: 0 }}
-						onClick={onClose}
-						className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
+						exit={{ opacity: 0, pointerEvents: 'none' }}
+						transition={{ duration: 0.2 }}
+						onClick={handleClose}
+						className="absolute inset-0 bg-black/60 backdrop-blur-sm pointer-events-auto"
 					/>
 
 					{/* Modal */}
 					<motion.div
 						initial={{ opacity: 0, scale: 0.95, y: 20 }}
 						animate={{ opacity: 1, scale: 1, y: 0 }}
-						exit={{ opacity: 0, scale: 0.95, y: 20 }}
-						className="fixed inset-0 m-auto w-full max-w-4xl h-[80vh] bg-[#111] border border-white/10 rounded-3xl shadow-2xl z-[70] overflow-hidden flex flex-col md:flex-row"
+						exit={{ opacity: 0, scale: 0.95, y: 20, pointerEvents: 'none' }}
+						transition={{ duration: 0.2 }}
+						className="fixed inset-0 m-auto w-full max-w-4xl h-[80vh] bg-[#111] border border-white/10 rounded-3xl shadow-2xl z-[70] overflow-hidden flex flex-col md:flex-row pointer-events-auto"
 					>
 						{/* Sidebar */}
 						<div className="w-full md:w-64 bg-black/20 border-b md:border-b-0 md:border-r border-white/5 p-4 flex flex-col gap-2">
@@ -87,6 +173,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 							<div className="flex md:flex-col gap-2 overflow-x-auto md:overflow-visible no-scrollbar">
 								{tabs.map((tab) => {
 									const Icon = tab.icon;
+									const themeColor = activeTheme?.toggle || 'bg-purple-500';
 									return (
 										<button
 											key={tab.id}
@@ -101,12 +188,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 											{activeTab === tab.id && (
 												<motion.div
 													layoutId="activeTab"
-													className="absolute left-0 w-1 h-8 bg-blue-500 rounded-r-full hidden md:block"
+													className={`absolute left-0 w-1 h-8 ${themeColor} rounded-r-full hidden md:block`}
 												/>
 											)}
 										</button>
 									);
 								})}
+							</div>
+
+							<div className="mt-auto hidden md:block px-4 py-2">
+								<p className="text-xs font-mono text-gray-600">V1.0</p>
 							</div>
 						</div>
 
@@ -115,14 +206,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 							{/* Mobile Header (Close Button) */}
 							<div className="p-4 border-b border-white/5 flex justify-between items-center md:hidden">
 								<span className="font-bold text-white">{tabs.find(t => t.id === activeTab)?.label}</span>
-								<button onClick={onClose} className="p-2 text-gray-500 hover:text-white transition-colors rounded-full hover:bg-white/10">
+								<button onClick={handleClose} className="p-2 text-gray-500 hover:text-white transition-colors rounded-full hover:bg-white/10">
 									<X size={20} />
 								</button>
 							</div>
 
 							{/* Desktop Close Button */}
 							<div className="hidden md:flex justify-end p-4 absolute top-0 right-0 z-10">
-								<button onClick={onClose} className="p-2 text-gray-500 hover:text-white transition-colors rounded-full hover:bg-white/10 bg-black/20 backdrop-blur-md">
+								<button onClick={handleClose} className="p-2 text-gray-500 hover:text-white transition-colors rounded-full hover:bg-white/10 bg-black/20 backdrop-blur-md">
 									<X size={20} />
 								</button>
 							</div>
@@ -145,7 +236,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 											<div className="space-y-4">
 												<div className="space-y-2">
 													<label className="text-sm font-medium text-gray-300 flex items-center gap-2">
-														<Save size={16} className="text-blue-400" />
+														<Save size={16} className={activeTheme?.icon || 'text-purple-400'} />
 														保存ファイル名テンプレート
 													</label>
 													<p className="text-xs text-gray-500">yt-dlpの出力テンプレート形式で指定してください。</p>
@@ -233,21 +324,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													</div>
 												</div>
 
+												{binariesExist && (
+													<div className="grid grid-cols-2 gap-4">
+														<div className="bg-white/5 p-3 rounded-xl border border-white/5">
+															<div className="text-xs text-gray-500 mb-1">yt-dlp バージョン</div>
+															<div className="flex items-center gap-2">
+																<div className="text-sm font-mono text-gray-200">{binaryVersions?.ytDlp || '不明'}</div>
+																{latestBinaryVersions?.ytDlp && binaryVersions?.ytDlp === latestBinaryVersions.ytDlp && (
+																	<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">最新</span>
+																)}
+															</div>
+														</div>
+														<div className="bg-white/5 p-3 rounded-xl border border-white/5">
+															<div className="text-xs text-gray-500 mb-1">ffmpeg バージョン</div>
+															<div className="flex items-center gap-2">
+																<div className="text-sm font-mono text-gray-200">{binaryVersions?.ffmpeg || '不明'}</div>
+																{latestBinaryVersions?.ffmpeg && binaryVersions?.ffmpeg && binaryVersions.ffmpeg.includes(latestBinaryVersions.ffmpeg) && (
+																	<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">最新</span>
+																)}
+															</div>
+														</div>
+													</div>
+												)}
+
 												<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 													{binariesExist ? (
 														<>
 															<button
 																onClick={onUpdateBinaries}
-																disabled={!!binaryStatus}
-																className="px-4 py-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-sm font-medium transition-colors border border-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+																disabled={!!binaryStatus || !!binaryUpdateProgress}
+																className={`px-4 py-3 rounded-xl ${activeTheme?.toggleBg || 'bg-purple-500/10'} hover:opacity-80 ${activeTheme?.icon || 'text-purple-400'} text-sm font-medium transition-colors border ${activeTheme?.border || 'border-purple-500/20'} disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
 															>
 																<Terminal size={16} />
 																yt-dlpを更新
 															</button>
 															<button
 																onClick={onUpdateFfmpeg}
-																disabled={!!binaryStatus}
-																className="px-4 py-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-sm font-medium transition-colors border border-purple-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+																disabled={!!binaryStatus || !!binaryUpdateProgress}
+																className={`px-4 py-3 rounded-xl ${activeTheme?.toggleBg || 'bg-purple-500/10'} hover:opacity-80 ${activeTheme?.icon || 'text-purple-400'} text-sm font-medium transition-colors border ${activeTheme?.border || 'border-purple-500/20'} disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
 															>
 																<Film size={16} />
 																ffmpegを更新
@@ -256,7 +370,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													) : (
 														<button
 															onClick={onDownloadBinaries}
-															disabled={!!binaryStatus}
+															disabled={!!binaryStatus || !!binaryUpdateProgress}
 															className="col-span-2 px-4 py-3 rounded-xl bg-green-500/10 hover:bg-green-500/20 text-green-400 text-sm font-medium transition-colors border border-green-500/20 animate-pulse disabled:animate-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
 														>
 															<Download size={16} />
@@ -264,6 +378,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 														</button>
 													)}
 												</div>
+
+												{binaryUpdateProgress && (
+													<div className="space-y-3">
+														<div className="flex justify-between items-center text-xs text-gray-400">
+															<span>{binaryUpdateProgress.status}</span>
+															{binaryUpdateProgress.percent >= 0 ? (
+																<span>{binaryUpdateProgress.percent}%</span>
+															) : (
+																<span>ダウンロード中...</span>
+															)}
+														</div>
+														<div className="w-full h-2 bg-white/10 rounded-full overflow-hidden relative">
+															{binaryUpdateProgress.percent >= 0 ? (
+																<motion.div
+																	className={`relative h-full rounded-full overflow-hidden ${activeTheme?.button || 'bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600'}`}
+																	initial={{ width: 0 }}
+																	animate={{ width: `${binaryUpdateProgress.percent}%` }}
+																	transition={{ duration: 0.3 }}
+																>
+																	<motion.div
+																		className="absolute inset-0 bg-white/30"
+																		initial={{ x: '-100%' }}
+																		animate={{ x: '100%' }}
+																		transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+																	/>
+																</motion.div>
+															) : (
+																<motion.div
+																	className={`absolute h-full rounded-full ${activeTheme?.button || 'bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600'}`}
+																	initial={{ left: '-30%' }}
+																	animate={{ left: '100%' }}
+																	transition={{ 
+																		duration: 1, 
+																		repeat: Infinity,
+																		ease: 'linear'
+																	}}
+																	style={{ width: '30%' }}
+																/>
+															)}
+														</div>
+														<button
+															onClick={onCancelDownload}
+															className="w-full px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm font-medium transition-colors border border-red-500/20 flex items-center justify-center gap-2"
+														>
+															<XCircle size={16} />
+															キャンセル
+														</button>
+													</div>
+												)}
 
 												{binaryStatus && (
 													<div className={`text-xs text-center py-2 rounded-lg border ${binaryStatus.type === 'success'
@@ -297,7 +460,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 												<button
 													onClick={handleSave}
 													disabled={!newPresetName.trim()}
-													className="px-4 py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+													className={`px-4 py-2 rounded-xl ${activeTheme?.toggleBg || 'bg-purple-500/20'} hover:opacity-80 text-gray-200 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
 												>
 													<Plus size={16} />
 													保存
@@ -346,12 +509,97 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 											</div>
 										</div>
 									)}
+
+									{activeTab === 'info' && (
+										<div className="space-y-6">
+											<div>
+												<h3 className="text-lg font-semibold text-white mb-1">アプリケーション情報</h3>
+												<p className="text-sm text-gray-500">バージョン情報と免責事項</p>
+											</div>
+
+											<div className="bg-white/5 rounded-2xl p-6 border border-white/5 space-y-4">
+												<div className="flex items-center gap-4 mb-4">
+													<div className={`w-16 h-16 rounded-2xl ${activeTheme?.button || 'bg-purple-600'} flex items-center justify-center shadow-lg`}>
+														<Download size={32} className="text-white" />
+													</div>
+													<div>
+														<h4 className="text-xl font-bold text-white">yt-dlp-gui</h4>
+														<p className="text-sm text-gray-400">Version 1.0</p>
+													</div>
+												</div>
+												
+												<div className="space-y-2 text-sm text-gray-300">
+													<div className="flex justify-between py-2 border-b border-white/5">
+														<span className="text-gray-500">制作者</span>
+														<span>Tomakura</span>
+													</div>
+													<div className="flex justify-between py-2 border-b border-white/5">
+														<span className="text-gray-500">yt-dlp</span>
+														<span className="font-mono">{binaryVersions?.ytDlp || '不明'}</span>
+													</div>
+													<div className="flex justify-between py-2 border-b border-white/5">
+														<span className="text-gray-500">ffmpeg</span>
+														<span className="font-mono">{binaryVersions?.ffmpeg || '不明'}</span>
+													</div>
+												</div>
+
+												<div className="pt-2 space-y-2">
+													<button
+														className={`w-full px-4 py-3 rounded-xl ${activeTheme?.toggleBg || 'bg-purple-500/10'} hover:opacity-80 ${activeTheme?.icon || 'text-purple-400'} text-sm font-medium transition-colors border ${activeTheme?.border || 'border-purple-500/20'} flex items-center justify-center gap-2`}
+														onClick={handleCheckAppUpdate}
+														disabled={appUpdateStatus?.checking}
+													>
+														{appUpdateStatus?.checking ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
+														{appUpdateStatus?.checking ? '確認中...' : 'アプリケーションの更新を確認'}
+													</button>
+
+													{appUpdateStatus && !appUpdateStatus.checking && (
+														<div className={`text-xs text-center py-3 rounded-lg border ${
+															appUpdateStatus.available 
+															? 'text-green-300 bg-green-500/10 border-green-500/20' 
+															: 'text-gray-400 bg-white/5 border-white/5'
+														}`}>
+															<div className="font-medium mb-1">{appUpdateStatus.message}</div>
+															{appUpdateStatus.available && appUpdateStatus.url && (
+																<button 
+																	onClick={() => window.electron.openExternal(appUpdateStatus.url!)}
+																	className="text-blue-400 hover:text-blue-300 hover:underline transition-colors"
+																>
+																	ダウンロードページを開く
+																</button>
+															)}
+														</div>
+													)}
+												</div>
+
+												<div className="mt-6 p-4 bg-white/5 rounded-xl border border-white/5">
+													<h5 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+														<Info size={14} className="text-blue-400" />
+														免責事項
+													</h5>
+													<p className="text-xs text-gray-400 leading-relaxed">
+														このアプリケーションは、ユーザーが自身の責任において使用することを前提としています。
+														本ソフトウェアの使用により生じたいかなる損害、トラブル、法的責任について、制作者は一切の責任を負いません。
+														著作権法および関連法規を遵守し、私的利用の範囲内でご使用ください。
+													</p>
+												</div>
+
+												<div className="text-center pt-4">
+													<p className="text-xs text-gray-600 italic">
+														このアプリケーションは、AIを使用したアプリケーション作成テストとして作成されました。
+													</p>
+												</div>
+											</div>
+										</div>
+									)}
 								</motion.div>
 							</div>
 						</div>
 					</motion.div>
-				</>
+				</motion.div>
 			)}
 		</AnimatePresence>
 	);
+
+	return createPortal(modalContent, document.body);
 };
