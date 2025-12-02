@@ -9,6 +9,7 @@ export interface DownloadPayload {
   advancedOptions: AdvancedOptionsState;
   videoConversion?: VideoConversionOptions;
   outputTemplate: string;
+  notificationsEnabled: boolean;
 }
 
 export interface DownloadResult {
@@ -20,9 +21,15 @@ export interface DownloadResult {
 }
 
 export interface BinaryUpdateProgress {
-  type: 'ytdlp' | 'ffmpeg';
+  type: 'ytdlp' | 'ffmpeg' | 'all';
   percent: number;
-  status: string;
+  status?: string;
+  statusKey?: string;
+  progressData?: {
+    downloaded: number;
+    total: number;
+    speed: number;
+  };
 }
 
 export interface VideoInfoResult {
@@ -76,6 +83,7 @@ declare global {
   interface Window {
     electron: {
       selectDirectory: () => Promise<string | null>;
+      openFileDialog: () => Promise<{ content: string; filePath: string } | null>;
       getDefaultDownloadPath: () => Promise<string>;
       checkBinaries: () => Promise<{ ytdlp: boolean; ffmpeg: boolean; path: string }>;
       getBinaryVersions: () => Promise<{ ytDlp: string; ffmpeg: string }>;
@@ -98,4 +106,4 @@ declare global {
   }
 }
 
-export {};
+export { };

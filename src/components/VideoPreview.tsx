@@ -63,7 +63,7 @@ const formatDuration = (seconds: number): string => {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
-  
+
   if (hours > 0) {
     return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
@@ -89,7 +89,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
 }) => {
   const { t } = useI18n();
   const [currentIndex, setCurrentIndex] = useState(0);
-  
+
   const themeStyles = theme || {
     icon: 'text-purple-400',
     primary: 'from-blue-400',
@@ -119,7 +119,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
 
   // Check if URL is valid
   const isValidUrl = url && (url.startsWith('http://') || url.startsWith('https://'));
-  
+
   // Check if we have no data and not loading
   const hasNoData = !isLoading && !error && !videoInfo && !playlistInfo;
 
@@ -136,24 +136,25 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
         <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
           <Film size={14} className={themeStyles.icon} />
           <span>{t('videoInfo')}</span>
+          {!isLoading && (videoInfo || playlistInfo) && (
+            isPlaylist ? (
+              <span className="shrink-0 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-bold border border-orange-500/30 ml-2">
+                {t('playlist')}
+              </span>
+            ) : (
+              <span className="shrink-0 px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 text-[10px] font-bold border border-blue-500/30 ml-2">
+                {t('video')}
+              </span>
+            )
+          )}
           {isLoading && (
             <Loader2 size={12} className="animate-spin text-gray-500" />
           )}
-          {!isLoading && currentVideo && (
-            <span className="text-[10px] text-gray-500 font-normal truncate max-w-[200px]">
-              - {currentVideo.title}
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-2">
-          {currentVideo?.bestResolution && (
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-medium">
-              {currentVideo.bestResolution}
-            </span>
-          )}
           {isPlaylist && (
             <span className="px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-medium">
-              {playlistInfo.entries.length} {t('items')}
+              {currentIndex + 1} / {playlistInfo.entries.length}
             </span>
           )}
           {isExpanded ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
@@ -223,7 +224,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
                         <Play size={28} className="text-gray-600" />
                       </div>
                     )}
-                    
+
                     {/* Duration overlay */}
                     {currentVideo.duration > 0 && (
                       <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] text-white font-medium">
@@ -271,15 +272,6 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
                       )}
                     </div>
 
-                    {/* Playlist indicator */}
-                    {isPlaylist && (
-                      <div className="flex items-center gap-2 pt-0.5">
-                        <List size={11} className="text-orange-400" />
-                        <span className="text-[11px] text-orange-400">
-                          {t('playlist')}: {currentIndex + 1} / {playlistInfo.entries.length}
-                        </span>
-                      </div>
-                    )}
                   </div>
                 </div>
               )}
@@ -290,11 +282,10 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
                   <button
                     onClick={handlePrevious}
                     disabled={currentIndex === 0}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors ${
-                      currentIndex === 0
-                        ? 'text-gray-600 cursor-not-allowed'
-                        : 'text-gray-400 hover:text-white hover:bg-white/10'
-                    }`}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors ${currentIndex === 0
+                      ? 'text-gray-600 cursor-not-allowed'
+                      : 'text-gray-400 hover:text-white hover:bg-white/10'
+                      }`}
                   >
                     <ChevronLeft size={14} />
                     {t('previous')}
@@ -311,11 +302,10 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
                         <button
                           key={entry.id}
                           onClick={() => setCurrentIndex(actualIndex)}
-                          className={`w-2 h-2 rounded-full transition-all ${
-                            actualIndex === currentIndex
-                              ? `${themeStyles.icon.replace('text-', 'bg-')} w-4`
-                              : 'bg-white/20 hover:bg-white/40'
-                          }`}
+                          className={`w-2 h-2 rounded-full transition-all ${actualIndex === currentIndex
+                            ? `${themeStyles.icon.replace('text-', 'bg-')} w-4`
+                            : 'bg-white/20 hover:bg-white/40'
+                            }`}
                         />
                       );
                     })}
@@ -324,11 +314,10 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
                   <button
                     onClick={handleNext}
                     disabled={currentIndex === playlistInfo.entries.length - 1}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors ${
-                      currentIndex === playlistInfo.entries.length - 1
-                        ? 'text-gray-600 cursor-not-allowed'
-                        : 'text-gray-400 hover:text-white hover:bg-white/10'
-                    }`}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors ${currentIndex === playlistInfo.entries.length - 1
+                      ? 'text-gray-600 cursor-not-allowed'
+                      : 'text-gray-400 hover:text-white hover:bg-white/10'
+                      }`}
                   >
                     {t('next')}
                     <ChevronRight size={14} />

@@ -1,6 +1,6 @@
 {
   "name": "yt-dlp-gui",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A GUI for yt-dlp",
   "author": "tomakura",
   "private": true,
@@ -43,7 +43,15 @@
       "identity": null
     },
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
       "artifactName": "${productName} Setup ${version}-${arch}.${ext}"
     },
     "linux": {

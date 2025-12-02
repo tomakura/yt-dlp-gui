@@ -10,7 +10,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { DownloadHistory } from './components/DownloadHistory';
 import { VideoPreview, VideoInfo, PlaylistInfo } from './components/VideoPreview';
 import { FormatOptions, AdvancedOptionsState, DownloadHistoryItem } from './types/options';
-import { DownloadResult } from './types/electron';
+import { DownloadResult, BinaryUpdateProgress } from './types/electron';
 import { Preset } from './types/Preset';
 import { useI18n } from './i18n';
 
@@ -143,7 +143,8 @@ function App() {
 			writeAutoSub: false,
 			splitChapters: false,
 			playlist: 'default',
-			cookiesBrowser: 'none'
+			cookiesBrowser: 'none',
+			timeRange: { enabled: false, start: '', end: '' }
 		};
 	});
 
@@ -151,11 +152,21 @@ function App() {
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [presets, setPresets] = useState<Preset[]>([]);
 	const [outputTemplate, setOutputTemplate] = useState('%(title)s.%(ext)s');
+	const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+		return localStorage.getItem('notificationsEnabled') === 'true';
+	});
+
+	useEffect(() => {
+		localStorage.setItem('notificationsEnabled', String(notificationsEnabled));
+	}, [notificationsEnabled]);
+
+	// Batch Download Queue
+	const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>([]);
 
 	// Binary Status State
 	const [binariesExist, setBinariesExist] = useState<boolean | null>(null);
 	const [binaryStatus, setBinaryStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
-	const [binaryUpdateProgress, setBinaryUpdateProgress] = useState<{ type: 'ytdlp' | 'ffmpeg'; percent: number; status: string } | null>(null);
+	const [binaryUpdateProgress, setBinaryUpdateProgress] = useState<BinaryUpdateProgress | null>(null);
 	const [isUpdatingBinaries, setIsUpdatingBinaries] = useState(false);
 	const [binaryVersions, setBinaryVersions] = useState<{ ytDlp: string; ffmpeg: string } | null>(null);
 	const [latestBinaryVersions, setLatestBinaryVersions] = useState<{ ytDlp: string; ffmpeg: string } | null>(null);
@@ -209,7 +220,7 @@ function App() {
 		if (formatOptions.type === 'video') {
 			const videoFormats = formats.filter(f => f.vcodec && f.vcodec !== 'none');
 			const audioFormats = formats.filter(f => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
-			
+
 			if (!videoFormats.length) return currentVideo.filesize;
 
 			// Find matching video format based on resolution
@@ -229,7 +240,7 @@ function App() {
 
 			// Get video size
 			let videoSize = matchingVideoFormat?.filesize || matchingVideoFormat?.filesize_approx || 0;
-			
+
 			// If no filesize, estimate from bitrate and duration
 			if (!videoSize && matchingVideoFormat?.tbr && duration > 0) {
 				// tbr is total bitrate in kbps
@@ -239,11 +250,11 @@ function App() {
 			// Get best audio size
 			let audioSize = 0;
 			if (audioFormats.length > 0) {
-				const bestAudio = [...audioFormats].sort((a, b) => 
+				const bestAudio = [...audioFormats].sort((a, b) =>
 					(b.filesize || b.filesize_approx || 0) - (a.filesize || a.filesize_approx || 0)
 				)[0];
 				audioSize = bestAudio?.filesize || bestAudio?.filesize_approx || 0;
-				
+
 				// If no audio filesize, estimate (assume ~128kbps audio)
 				if (!audioSize && duration > 0) {
 					audioSize = Math.round((128 * 1000 * duration) / 8);
@@ -316,7 +327,7 @@ function App() {
 			setTotalSize(downloadMatch[2]);
 			setDownloadSpeed(downloadMatch[3]);
 			setEta(downloadMatch[4]);
-			
+
 			// Calculate downloaded size
 			const percent = parseFloat(downloadMatch[1]) / 100;
 			const totalMatch = downloadMatch[2].match(/(\d+\.?\d*)/);
@@ -328,14 +339,14 @@ function App() {
 			}
 			return;
 		}
-		
+
 		// Match simpler pattern "[download]  45.2% of 100.00MiB"
 		const simpleMatch = log.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\d+\.?\d*\w+)/i);
 		if (simpleMatch) {
 			setDownloadProgress(parseFloat(simpleMatch[1]));
 			setTotalSize(simpleMatch[2]);
 		}
-		
+
 		// Also match ffmpeg conversion progress
 		const ffmpegMatch = log.match(/time=(\d+):(\d+):(\d+)/);
 		if (ffmpegMatch) {
@@ -367,7 +378,7 @@ function App() {
 
 					try {
 						const result = await window.electron.fetchVideoInfo(urlToFetch);
-						
+
 						if (result.error) {
 							setVideoPreviewError(result.error);
 						} else if (result.isPlaylist && result.playlist) {
@@ -408,7 +419,7 @@ function App() {
 			if (allExist) {
 				const versions = await window.electron.getBinaryVersions();
 				setBinaryVersions(versions);
-				
+
 				// Fetch latest versions in background
 				window.electron.getLatestBinaryVersions().then(latest => {
 					setLatestBinaryVersions(latest);
@@ -489,16 +500,16 @@ function App() {
 	useEffect(() => {
 		const removeCompleteListeners = window.electron.onDownloadComplete((result: DownloadResult) => {
 			setIsDownloading(false);
-			
+
 			if (result.message.toLowerCase().includes('cancel')) {
 				setStatus('cancelled');
 			} else {
 				setStatus(result.success ? 'complete' : 'error');
 			}
-			
+
 			setLogs(prev => [...prev, result.message]);
 			setDownloadProgress(result.success ? 100 : 0);
-			
+
 			// Add to history - use refs to get current values
 			setDownloadHistory(prev => {
 				const historyItem: DownloadHistoryItem = {
@@ -594,8 +605,33 @@ function App() {
 		}
 	};
 
-	const handleDownload = useCallback(() => {
-		if (!url) return;
+
+	// Process Queue Effect
+	useEffect(() => {
+		if (!isDownloading && downloadQueue.length > 0) {
+			const nextUrl = downloadQueue[0];
+			setDownloadQueue(prev => prev.slice(1));
+			setUrl(nextUrl.url);
+			// Small delay to allow state update
+			setTimeout(() => {
+				// Trigger download for the next URL
+				// We need to call the internal logic of handleDownload but with the new URL
+				// Since handleDownload uses the 'url' state which might not be updated yet in this closure,
+				// we should refactor handleDownload or use a ref, but for now let's just rely on the effect
+				// actually, we can't call handleDownload directly because it depends on 'url' state.
+				// Instead, let's make handleDownload accept an optional argument.
+			}, 100);
+		}
+	}, [isDownloading, downloadQueue]);
+
+	// Batch Download Queue
+	// const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>([]); // This line is removed as per instruction
+
+	// ... (lines 166-638 omitted for brevity, assuming they are unchanged or handled elsewhere)
+
+	// Refactor handleDownload to accept URL override
+	const startDownloadProcess = useCallback((targetUrl: string, subfolder?: string) => {
+		if (!targetUrl) return;
 		if (!location) {
 			alert(t('selectDestination'));
 			return;
@@ -604,9 +640,9 @@ function App() {
 		setIsDownloading(true);
 		setStatus('downloading');
 		setDownloadProgress(0);
-		setCurrentDownloadUrl(url);
+		setCurrentDownloadUrl(targetUrl);
 		setLogs([t('startingDownload')]);
-		
+
 		// Reset progress details
 		setDownloadSpeed('');
 		setDownloadedSize('');
@@ -617,16 +653,70 @@ function App() {
 		const customArgsInput = document.getElementById('custom-args') as HTMLInputElement;
 		const customArgs = customArgsInput?.value ? customArgsInput.value.split(' ').filter(a => a) : [];
 
+		// Determine final output template
+		let finalOutputTemplate = outputTemplate;
+
+		// If subfolder is provided (Batch Import), prepend it
+		if (subfolder) {
+			// Use forward slash for template, yt-dlp handles OS path separators
+			finalOutputTemplate = `${subfolder}/` + finalOutputTemplate;
+		}
+		// If it's a playlist (and not a batch import with explicit subfolder), append playlist folder
+		else if (advancedOptions.playlist === 'all' || (playlistInfo && playlistInfo.entries.length > 1)) {
+			finalOutputTemplate = '%(playlist_title)s/' + finalOutputTemplate;
+		}
+
 		window.electron.startDownload({
-			url,
+			url: targetUrl,
 			format: formatOptions.type,
 			location,
 			args: customArgs,
 			options: formatOptions,
 			advancedOptions,
-			outputTemplate // Pass the template
+			outputTemplate: finalOutputTemplate,
+			notificationsEnabled
 		});
-	}, [url, location, formatOptions, advancedOptions, outputTemplate, t]);
+	}, [location, formatOptions, advancedOptions, outputTemplate, notificationsEnabled, t, playlistInfo]);
+
+	// Update original handleDownload to use the new function
+	const handleDownload = useCallback(() => {
+		startDownloadProcess(url);
+	}, [startDownloadProcess, url]);
+
+	// Queue processing effect - improved
+	useEffect(() => {
+		if (!isDownloading && downloadQueue.length > 0) {
+			const nextItem = downloadQueue[0];
+			setDownloadQueue(prev => prev.slice(1));
+			// Update URL state for UI consistency
+			setUrl(nextItem.url);
+			// Start download
+			startDownloadProcess(nextItem.url, nextItem.subfolder);
+		}
+	}, [isDownloading, downloadQueue, startDownloadProcess]);
+
+	const handleBatchImport = async () => {
+		try {
+			const result = await window.electron.openFileDialog();
+			if (result && result.content) {
+				const urls = result.content.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
+
+				// Extract filename without extension for subfolder
+				// We need to handle both Windows (\) and Unix (/) paths
+				const filePath = result.filePath;
+				const fileName = filePath.split(/[/\\]/).pop() || 'Batch Download';
+				const subfolder = fileName.replace(/\.[^/.]+$/, ""); // Remove extension
+
+				if (urls.length > 0) {
+					const queueItems = urls.map(url => ({ url, subfolder }));
+					setDownloadQueue(prev => [...prev, ...queueItems]);
+					setLogs(prev => [...prev, `Added ${urls.length} URLs to queue (Folder: ${subfolder})`]);
+				}
+			}
+		} catch (e) {
+			console.error('Failed to import file', e);
+		}
+	};
 
 	// Keyboard shortcuts - must be after handleDownload definition
 	useEffect(() => {
@@ -652,7 +742,7 @@ function App() {
 
 	const handleUpdateBinaries = async () => {
 		setIsUpdatingBinaries(true);
-		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, status: t('startingYtDlpUpdate') });
+		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, statusKey: 'startingYtDlpUpdate' });
 		setBinaryStatus(null);
 		setLogs(prev => [...prev, t('startingYtDlpUpdate')]);
 		const result = await window.electron.updateYtDlp();
@@ -661,21 +751,18 @@ function App() {
 		if (result === true) {
 			setBinaryStatus({ message: t('updateComplete'), type: 'success' });
 			setLogs(prev => [...prev, t('ytDlpUpdateComplete')]);
-			setTimeout(() => setBinaryStatus(null), 3000);
 		} else if (result === 'cancelled') {
 			setBinaryStatus({ message: t('updateCancelled'), type: 'info' });
 			setLogs(prev => [...prev, t('ytDlpUpdateCancelled')]);
-			setTimeout(() => setBinaryStatus(null), 3000);
 		} else {
 			setBinaryStatus({ message: t('updateFailed'), type: 'error' });
 			setLogs(prev => [...prev, t('ytDlpUpdateFailed')]);
-			setTimeout(() => setBinaryStatus(null), 3000);
 		}
 	};
 
 	const handleUpdateFfmpeg = async () => {
 		setIsUpdatingBinaries(true);
-		setBinaryUpdateProgress({ type: 'ffmpeg', percent: 0, status: t('startingFfmpegUpdate') });
+		setBinaryUpdateProgress({ type: 'ffmpeg', percent: 0, statusKey: 'startingFfmpegUpdate' });
 		setBinaryStatus(null);
 		setLogs(prev => [...prev, t('startingFfmpegUpdate')]);
 		const result = await window.electron.updateFfmpeg();
@@ -684,15 +771,12 @@ function App() {
 		if (result === true) {
 			setBinaryStatus({ message: t('updateComplete'), type: 'success' });
 			setLogs(prev => [...prev, t('ffmpegUpdateComplete')]);
-			setTimeout(() => setBinaryStatus(null), 3000);
 		} else if (result === 'cancelled') {
 			setBinaryStatus({ message: t('updateCancelled'), type: 'info' });
 			setLogs(prev => [...prev, t('ffmpegUpdateCancelled')]);
-			setTimeout(() => setBinaryStatus(null), 3000);
 		} else {
 			setBinaryStatus({ message: t('updateFailed'), type: 'error' });
 			setLogs(prev => [...prev, t('ffmpegUpdateFailed')]);
-			setTimeout(() => setBinaryStatus(null), 3000);
 		}
 	};
 
@@ -702,7 +786,7 @@ function App() {
 
 	const handleDownloadBinaries = async () => {
 		setIsUpdatingBinaries(true);
-		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, status: t('startingBinaryDownload') });
+		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, statusKey: 'startingBinaryDownload' });
 		setBinaryStatus(null);
 		setLogs(prev => [...prev, t('startingBinaryDownload')]);
 		const success = await window.electron.downloadBinaries();
@@ -712,11 +796,9 @@ function App() {
 			setBinaryStatus({ message: t('downloadComplete2'), type: 'success' });
 			setLogs(prev => [...prev, t('binaryDownloadComplete')]);
 			checkBinaries(); // Re-check status
-			setTimeout(() => setBinaryStatus(null), 3000);
 		} else {
 			setBinaryStatus({ message: t('downloadFailed'), type: 'error' });
 			setLogs(prev => [...prev, t('binaryDownloadFailed')]);
-			setTimeout(() => setBinaryStatus(null), 3000);
 		}
 	};
 
@@ -749,11 +831,10 @@ function App() {
 
 						<button
 							onClick={() => setShowHistory(!showHistory)}
-							className={`p-2 rounded-full transition-colors cursor-pointer ${
-								showHistory 
-									? `${theme.button} bg-opacity-20` 
-									: 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
-							}`}
+							className={`p-2 rounded-full transition-colors cursor-pointer ${showHistory
+								? `${theme.button} bg-opacity-20`
+								: 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
+								}`}
 							title={t('downloadHistory')}
 						>
 							<History size={18} className={showHistory ? 'text-white' : ''} />
@@ -800,8 +881,8 @@ function App() {
 							)}
 
 							<div className="shrink-0 space-y-3">
-								<UrlInput url={url} setUrl={setUrl} theme={{ icon: theme.icon }} />
-								
+								<UrlInput url={url} setUrl={setUrl} theme={{ icon: theme.icon }} onImport={handleBatchImport} />
+
 								{/* Video Preview */}
 								{url && (
 									<VideoPreview
@@ -820,7 +901,7 @@ function App() {
 										}}
 									/>
 								)}
-								
+
 								{/* Clipboard Monitor Toggle */}
 								<div className="flex items-center justify-end px-1">
 									<div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsClipboardMonitorEnabled(!isClipboardMonitorEnabled)}>
@@ -836,8 +917,8 @@ function App() {
 							</div>
 
 							<div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
-								<FormatSelector 
-									options={formatOptions} 
+								<FormatSelector
+									options={formatOptions}
 									setOptions={setFormatOptions}
 									theme={{
 										tabActive: theme.activeTab.split(' ')[0],
@@ -915,7 +996,7 @@ function App() {
 												transition={{ duration: 0.3 }}
 											/>
 										)}
-										
+
 										<span className="relative z-10 flex items-center gap-2">
 											{isDownloading ? (
 												<>
@@ -988,7 +1069,7 @@ function App() {
 								{/* Console Toggle & Output */}
 								<div className="space-y-2">
 									<div className="flex items-center justify-between">
-										<button 
+										<button
 											onClick={() => setShowConsole(!showConsole)}
 											className="flex items-center gap-2 text-xs text-gray-400 hover:text-white transition-colors"
 										>
@@ -999,11 +1080,11 @@ function App() {
 												transition={{ duration: 0.2 }}
 											>
 												<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<path d="M6 9l6 6 6-6"/>
+													<path d="M6 9l6 6 6-6" />
 												</svg>
 											</motion.div>
 										</button>
-										
+
 										{/* Status Toast Placeholder / Display */}
 										<div className="h-8 flex items-center justify-end min-w-[200px]">
 											<AnimatePresence mode="wait">
@@ -1017,9 +1098,9 @@ function App() {
 															status={status}
 															message={
 																status === 'complete' ? t('downloadCompleteMsg') :
-																status === 'downloading' ? t('downloadingMsg') :
-																status === 'cancelled' ? t('cancelledMsg') :
-																t('downloadErrorMsg')
+																	status === 'downloading' ? t('downloadingMsg') :
+																		status === 'cancelled' ? t('cancelledMsg') :
+																			t('downloadErrorMsg')
 															}
 															onClose={() => setStatus('idle')}
 														/>
@@ -1047,7 +1128,7 @@ function App() {
 															<X size={12} />
 														</button>
 													</div>
-													<div 
+													<div
 														ref={logsContainerRef}
 														className="flex-1 bg-[#0a0a0a]/50 rounded-lg border border-white/5 p-2 overflow-y-auto font-mono text-[10px] text-gray-300 space-y-1 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent shadow-inner"
 													>
@@ -1059,8 +1140,8 @@ function App() {
 														) : (
 															<>
 																{logs.map((log, i) => (
-																	<motion.div 
-																		key={i} 
+																	<motion.div
+																		key={i}
 																		initial={{ opacity: 0, y: -3 }}
 																		animate={{ opacity: 1, y: 0 }}
 																		transition={{ duration: 0.15, ease: "easeOut" }}
@@ -1084,26 +1165,27 @@ function App() {
 
 
 
-					{/* History Panel */}
-					<AnimatePresence>
-						{showHistory && (
-							<motion.div
-								initial={{ opacity: 0, height: 0 }}
-								animate={{ opacity: 1, height: 'auto' }}
-								exit={{ opacity: 0, height: 0 }}
-								className="w-full shrink-0 overflow-hidden"
-							>
-								<div className="glass rounded-3xl p-4 shadow-2xl">
-									<DownloadHistory
-										history={downloadHistory}
-										onClearHistory={handleClearHistory}
-										onRemoveItem={handleRemoveHistoryItem}
-									/>
-								</div>
-							</motion.div>
-						)}
-					</AnimatePresence>
 				</div>
+
+				{/* History Panel - Fixed at bottom */}
+				<AnimatePresence>
+					{showHistory && (
+						<motion.div
+							initial={{ opacity: 0, height: 0 }}
+							animate={{ opacity: 1, height: 'auto' }}
+							exit={{ opacity: 0, height: 0 }}
+							className="w-full shrink-0 overflow-hidden pt-4"
+						>
+							<div className="glass rounded-3xl p-4 shadow-2xl">
+								<DownloadHistory
+									history={downloadHistory}
+									onClearHistory={handleClearHistory}
+									onRemoveItem={handleRemoveHistoryItem}
+								/>
+							</div>
+						</motion.div>
+					)}
+				</AnimatePresence>
 
 				<SettingsModal
 					isOpen={isSettingsOpen}
@@ -1125,6 +1207,9 @@ function App() {
 					themes={themes}
 					binaryVersions={binaryVersions}
 					latestBinaryVersions={latestBinaryVersions}
+					onClearBinaryStatus={() => setBinaryStatus(null)}
+					notificationsEnabled={notificationsEnabled}
+					setNotificationsEnabled={setNotificationsEnabled}
 				/>
 
 			</div>
