@@ -986,7 +986,13 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   }
 
   // Advanced options (only for video mode or applicable audio options)
-  if (payload.advancedOptions.embedThumbnail) args.push('--embed-thumbnail');
+  // Thumbnail embedding is only supported for: mp3, mkv/mka, ogg/opus/flac, m4a/mp4/m4v/mov
+  // WAV does not support embedded thumbnails
+  const thumbnailSupportedFormats = ['mp3', 'mkv', 'mka', 'ogg', 'opus', 'flac', 'm4a', 'mp4', 'm4v', 'mov', 'webm'];
+  const currentFormat = payload.options.type === 'audio' ? payload.options.audioFormat : payload.options.videoContainer;
+  const canEmbedThumbnail = thumbnailSupportedFormats.includes(currentFormat.toLowerCase());
+  
+  if (payload.advancedOptions.embedThumbnail && canEmbedThumbnail) args.push('--embed-thumbnail');
   if (payload.advancedOptions.addMetadata) args.push('--add-metadata');
 
   // Video-only options

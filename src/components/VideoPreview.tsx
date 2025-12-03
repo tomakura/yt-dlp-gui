@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Play, Clock, User, List, ChevronDown, ChevronUp, Loader2, AlertCircle, Film, Link2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Clock, User, List, ChevronDown, ChevronUp, Loader2, AlertCircle, Film, Link2, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useI18n } from '../i18n';
 
@@ -54,6 +54,7 @@ interface VideoPreviewProps {
   videoInfo: VideoInfo | null;
   playlistInfo: PlaylistInfo | null;
   onToggle: () => void;
+  onRefresh?: () => void;
   isExpanded: boolean;
   theme?: Theme;
 }
@@ -84,6 +85,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
   videoInfo,
   playlistInfo,
   onToggle,
+  onRefresh,
   isExpanded,
   theme,
 }) => {
@@ -156,6 +158,19 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
             <span className="px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-medium">
               {currentIndex + 1} / {playlistInfo.entries.length}
             </span>
+          )}
+          {onRefresh && isExpanded && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRefresh();
+              }}
+              disabled={isLoading}
+              className="p-1 rounded hover:bg-white/10 transition-colors disabled:opacity-50"
+              title={t('refresh')}
+            >
+              <RefreshCw size={12} className={`text-gray-400 hover:text-gray-200 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
           )}
           {isExpanded ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
         </div>

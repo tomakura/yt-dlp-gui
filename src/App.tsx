@@ -361,45 +361,67 @@ function App() {
 		}
 	}, []);
 
+	// Track the current fetch request to avoid stale results
+	const fetchRequestIdRef = useRef(0);
+	const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
 	// Fetch video info when URL changes
 	const fetchVideoInfoDebounced = useCallback(
-		(() => {
-			let timeoutId: NodeJS.Timeout | null = null;
-			return (urlToFetch: string) => {
-				if (timeoutId) {
-					clearTimeout(timeoutId);
-				}
-				timeoutId = setTimeout(async () => {
-					if (!urlToFetch || !urlToFetch.startsWith('http')) {
-						setVideoInfo(null);
-						setPlaylistInfo(null);
-						setVideoPreviewError(null);
+		(urlToFetch: string) => {
+			// Clear any pending timeout
+			if (fetchTimeoutRef.current) {
+				clearTimeout(fetchTimeoutRef.current);
+				fetchTimeoutRef.current = null;
+			}
+
+			// Increment request ID to invalidate any in-flight requests
+			fetchRequestIdRef.current += 1;
+			const currentRequestId = fetchRequestIdRef.current;
+
+			if (!urlToFetch || !urlToFetch.startsWith('http')) {
+				setVideoInfo(null);
+				setPlaylistInfo(null);
+				setVideoPreviewError(null);
+				setVideoPreviewLoading(false);
+				return;
+			}
+
+			fetchTimeoutRef.current = setTimeout(async () => {
+				setVideoPreviewLoading(true);
+				setVideoPreviewError(null);
+				setVideoInfo(null);
+				setPlaylistInfo(null);
+
+				try {
+					const result = await window.electron.fetchVideoInfo(urlToFetch);
+
+					// Check if this request is still the latest one
+					if (currentRequestId !== fetchRequestIdRef.current) {
+						// A newer request has been made, discard this result
 						return;
 					}
 
-					setVideoPreviewLoading(true);
-					setVideoPreviewError(null);
-					setVideoInfo(null);
-					setPlaylistInfo(null);
-
-					try {
-						const result = await window.electron.fetchVideoInfo(urlToFetch);
-
-						if (result.error) {
-							setVideoPreviewError(result.error);
-						} else if (result.isPlaylist && result.playlist) {
-							setPlaylistInfo(result.playlist as PlaylistInfo);
-						} else if (result.video) {
-							setVideoInfo(result.video as VideoInfo);
-						}
-					} catch (err: any) {
-						setVideoPreviewError(err.message || 'Failed to fetch video info');
-					} finally {
+					if (result.error) {
+						setVideoPreviewError(result.error);
+					} else if (result.isPlaylist && result.playlist) {
+						setPlaylistInfo(result.playlist as PlaylistInfo);
+					} else if (result.video) {
+						setVideoInfo(result.video as VideoInfo);
+					}
+				} catch (err: any) {
+					// Check if this request is still the latest one
+					if (currentRequestId !== fetchRequestIdRef.current) {
+						return;
+					}
+					setVideoPreviewError(err.message || 'Failed to fetch video info');
+				} finally {
+					// Only update loading state if this is still the latest request
+					if (currentRequestId === fetchRequestIdRef.current) {
 						setVideoPreviewLoading(false);
 					}
-				}, 800); // Debounce 800ms
-			};
-		})(),
+				}
+			}, 800); // Debounce 800ms
+		},
 		[]
 	);
 
@@ -905,6 +927,7 @@ function App() {
 										videoInfo={videoInfo}
 										playlistInfo={playlistInfo}
 										onToggle={() => setIsVideoPreviewExpanded(!isVideoPreviewExpanded)}
+										onRefresh={() => fetchVideoInfoDebounced(url)}
 										isExpanded={isVideoPreviewExpanded}
 										theme={{
 											icon: theme.icon,
