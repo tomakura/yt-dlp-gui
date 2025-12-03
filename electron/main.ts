@@ -968,10 +968,21 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     '--encoding', 'utf-8',
   ];
 
-  if (ffmpegPath && ffmpegPath !== 'ffmpeg') {
-    // Pass the full path to the binary, not just the directory
-    // This helps yt-dlp find the companion ffprobe binary more reliably
-    args.push('--ffmpeg-location', ffmpegPath);
+  if (ffmpegPath) {
+    // yt-dlp expects a directory for ffmpeg-location when resolving ffprobe.
+    // If we only have a binary path, pass its directory instead.
+    let ffmpegLocationArg: string | null = null;
+    try {
+      const stats = fs.statSync(ffmpegPath);
+      ffmpegLocationArg = stats.isDirectory() ? ffmpegPath : path.dirname(ffmpegPath);
+    } catch {
+      // If the path isn't directly accessible (e.g., system ffmpeg), use it as-is
+      ffmpegLocationArg = ffmpegPath;
+    }
+
+    if (ffmpegLocationArg !== 'ffmpeg') {
+      args.push('--ffmpeg-location', ffmpegLocationArg);
+    }
   }
 
   // Advanced options (only for video mode or applicable audio options)

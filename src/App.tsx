@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Download, Terminal, AlertCircle, X, Settings as SettingsIcon, History, XCircle, Zap } from 'lucide-react';
+import { Download, Terminal, AlertCircle, X, Settings as SettingsIcon, History, XCircle, Zap, ListPlus, ArrowUp, ArrowDown, Trash2, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UrlInput } from './components/UrlInput';
 import { FormatSelector } from './components/FormatSelector';
@@ -160,8 +160,12 @@ function App() {
 		localStorage.setItem('notificationsEnabled', String(notificationsEnabled));
 	}, [notificationsEnabled]);
 
-	// Batch Download Queue
-	const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>([]);
+        // Batch Download Queue
+        const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>(() => {
+                const saved = localStorage.getItem('downloadQueue');
+                return saved ? JSON.parse(saved) : [];
+        });
+        const [activePage, setActivePage] = useState<'download' | 'queueHistory'>('download');
 
 	// Binary Status State
 	const [binariesExist, setBinariesExist] = useState<boolean | null>(null);
@@ -175,20 +179,22 @@ function App() {
 	const [isClipboardMonitorEnabled, setIsClipboardMonitorEnabled] = useState(false);
 
 	// Favorites State
-	const [favorites, setFavorites] = useState<string[]>(() => {
-		const saved = localStorage.getItem('favoriteFolders');
-		return saved ? JSON.parse(saved) : [];
-	});
+        const [favorites, setFavorites] = useState<string[]>(() => {
+                const saved = localStorage.getItem('favoriteFolders');
+                return saved ? JSON.parse(saved) : [];
+        });
 
-	// Download History State
-	const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>(() => {
-		const saved = localStorage.getItem('downloadHistory');
-		return saved ? JSON.parse(saved) : [];
-	});
+        useEffect(() => {
+                localStorage.setItem('downloadQueue', JSON.stringify(downloadQueue));
+        }, [downloadQueue]);
 
-	// Show History Panel State
-	const [showHistory, setShowHistory] = useState(false);
-	const [showConsole, setShowConsole] = useState(false);
+        // Download History State
+        const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>(() => {
+                const saved = localStorage.getItem('downloadHistory');
+                return saved ? JSON.parse(saved) : [];
+        });
+
+        const [showConsole, setShowConsole] = useState(false);
 
 	// Download Progress State
 	const [downloadProgress, setDownloadProgress] = useState(0);
@@ -606,32 +612,9 @@ function App() {
 	};
 
 
-	// Process Queue Effect
-	useEffect(() => {
-		if (!isDownloading && downloadQueue.length > 0) {
-			const nextUrl = downloadQueue[0];
-			setDownloadQueue(prev => prev.slice(1));
-			setUrl(nextUrl.url);
-			// Small delay to allow state update
-			setTimeout(() => {
-				// Trigger download for the next URL
-				// We need to call the internal logic of handleDownload but with the new URL
-				// Since handleDownload uses the 'url' state which might not be updated yet in this closure,
-				// we should refactor handleDownload or use a ref, but for now let's just rely on the effect
-				// actually, we can't call handleDownload directly because it depends on 'url' state.
-				// Instead, let's make handleDownload accept an optional argument.
-			}, 100);
-		}
-	}, [isDownloading, downloadQueue]);
-
-	// Batch Download Queue
-	// const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>([]); // This line is removed as per instruction
-
-	// ... (lines 166-638 omitted for brevity, assuming they are unchanged or handled elsewhere)
-
-	// Refactor handleDownload to accept URL override
-	const startDownloadProcess = useCallback((targetUrl: string, subfolder?: string) => {
-		if (!targetUrl) return;
+        // Refactor handleDownload to accept URL override
+        const startDownloadProcess = useCallback((targetUrl: string, subfolder?: string) => {
+                if (!targetUrl) return;
 		if (!location) {
 			alert(t('selectDestination'));
 			return;
@@ -679,21 +662,51 @@ function App() {
 	}, [location, formatOptions, advancedOptions, outputTemplate, notificationsEnabled, t, playlistInfo]);
 
 	// Update original handleDownload to use the new function
-	const handleDownload = useCallback(() => {
-		startDownloadProcess(url);
-	}, [startDownloadProcess, url]);
+        const handleDownload = useCallback(() => {
+                startDownloadProcess(url);
+        }, [startDownloadProcess, url]);
 
-	// Queue processing effect - improved
-	useEffect(() => {
-		if (!isDownloading && downloadQueue.length > 0) {
-			const nextItem = downloadQueue[0];
-			setDownloadQueue(prev => prev.slice(1));
-			// Update URL state for UI consistency
-			setUrl(nextItem.url);
-			// Start download
-			startDownloadProcess(nextItem.url, nextItem.subfolder);
-		}
-	}, [isDownloading, downloadQueue, startDownloadProcess]);
+        const handleAddToQueue = useCallback(() => {
+                if (!url) return;
+                if (!location) {
+                        alert(t('selectDestination'));
+                        return;
+                }
+
+                setDownloadQueue(prev => [...prev, { url }]);
+                setLogs(prev => [...prev, t('queuedForDownload', { url })]);
+        }, [location, t, url]);
+
+        const handleRemoveQueueItem = useCallback((index: number) => {
+                setDownloadQueue(prev => prev.filter((_, i) => i !== index));
+        }, []);
+
+        const handleMoveQueueItem = useCallback((index: number, direction: 'up' | 'down') => {
+                setDownloadQueue(prev => {
+                        const newQueue = [...prev];
+                        const targetIndex = direction === 'up' ? index - 1 : index + 1;
+                        if (targetIndex < 0 || targetIndex >= newQueue.length) return prev;
+                        [newQueue[index], newQueue[targetIndex]] = [newQueue[targetIndex], newQueue[index]];
+                        return newQueue;
+                });
+        }, []);
+
+        const handleClearQueue = useCallback(() => {
+                setDownloadQueue([]);
+        }, []);
+
+        // Queue processing effect - improved
+        useEffect(() => {
+                if (!isDownloading && downloadQueue.length > 0) {
+                        const nextItem = downloadQueue[0];
+                        setDownloadQueue(prev => prev.slice(1));
+                        // Update URL state for UI consistency
+                        setUrl(nextItem.url);
+                        setLogs(prev => [...prev, t('startingQueuedDownload', { url: nextItem.url })]);
+                        // Start download
+                        startDownloadProcess(nextItem.url, nextItem.subfolder);
+                }
+        }, [isDownloading, downloadQueue, startDownloadProcess, t]);
 
 	const handleBatchImport = async () => {
 		try {
@@ -718,27 +731,20 @@ function App() {
 		}
 	};
 
-	// Keyboard shortcuts - must be after handleDownload definition
-	useEffect(() => {
-		const handleKeyDown = (e: KeyboardEvent) => {
-			// Cmd/Ctrl + Enter to start download
-			if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-				if (!isDownloading && url && location && binariesExist !== false && !isSettingsOpen) {
-					handleDownload();
-				}
-			}
-			// Escape to close settings or history
-			// Note: Settings modal handles its own ESC key via portal
-			if (e.key === 'Escape') {
-				if (showHistory) {
-					setShowHistory(false);
-				}
-			}
-		};
+        // Keyboard shortcuts - must be after handleDownload definition
+        useEffect(() => {
+                const handleKeyDown = (e: KeyboardEvent) => {
+                        // Cmd/Ctrl + Enter to start download
+                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                                if (!isDownloading && url && location && binariesExist !== false && !isSettingsOpen) {
+                                        handleDownload();
+                                }
+                        }
+                };
 
-		window.addEventListener('keydown', handleKeyDown);
-		return () => window.removeEventListener('keydown', handleKeyDown);
-	}, [isDownloading, url, location, binariesExist, isSettingsOpen, showHistory, handleDownload]);
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+        }, [isDownloading, url, location, binariesExist, isSettingsOpen, handleDownload]);
 
 	const handleUpdateBinaries = async () => {
 		setIsUpdatingBinaries(true);
@@ -820,30 +826,19 @@ function App() {
 					animate={{ opacity: 1, y: 0 }}
 					className="text-center space-y-1 mb-4 relative shrink-0"
 				>
-					<div className={`absolute top-0 flex items-center gap-2 z-50 no-drag ${isMac ? 'right-0 flex-row-reverse' : 'left-0'}`}>
-						<button
-							onClick={() => setIsSettingsOpen(true)}
-							className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
-							title={t('settings')}
-						>
-							<SettingsIcon size={18} className={theme.icon} />
-						</button>
+                                        <div className={`absolute top-0 flex items-center gap-2 z-50 no-drag ${isMac ? 'right-0 flex-row-reverse' : 'left-0'}`}>
+                                                <button
+                                                        onClick={() => setIsSettingsOpen(true)}
+                                                        className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                                                        title={t('settings')}
+                                                >
+                                                        <SettingsIcon size={18} className={theme.icon} />
+                                                </button>
 
-						<button
-							onClick={() => setShowHistory(!showHistory)}
-							className={`p-2 rounded-full transition-colors cursor-pointer ${showHistory
-								? `${theme.button} bg-opacity-20`
-								: 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
-								}`}
-							title={t('downloadHistory')}
-						>
-							<History size={18} className={showHistory ? 'text-white' : ''} />
-						</button>
-
-						{presets.length > 0 && (
-							<select
-								onChange={(e) => {
-									const preset = presets.find(p => p.id === e.target.value);
+                                                {presets.length > 0 && (
+                                                        <select
+                                                                onChange={(e) => {
+                                                                        const preset = presets.find(p => p.id === e.target.value);
 									if (preset) handleApplyPreset(preset);
 								}}
 								className="glass-input rounded-full px-3 py-1.5 text-[10px] text-gray-300 cursor-pointer hover:bg-white/10 transition-colors appearance-none"
@@ -859,19 +854,37 @@ function App() {
 						)}
 					</div>
 
-					<h1 className={`text-3xl font-bold font-display bg-gradient-to-r ${theme.primary} ${theme.secondary} ${theme.accent} bg-clip-text text-transparent drop-shadow-2xl tracking-tight`}>
-						yt-dlp GUI
-					</h1>
-					<p className="text-gray-400 text-xs font-light tracking-wide">{t('appSubtitle')}</p>
-				</motion.div>
+                                        <h1 className={`text-3xl font-bold font-display bg-gradient-to-r ${theme.primary} ${theme.secondary} ${theme.accent} bg-clip-text text-transparent drop-shadow-2xl tracking-tight`}>
+                                                yt-dlp GUI
+                                        </h1>
+                                        <p className="text-gray-400 text-xs font-light tracking-wide">{t('appSubtitle')}</p>
+                                        <div className="flex justify-center gap-2 pt-3">
+                                                <button
+                                                        onClick={() => setActivePage('download')}
+                                                        className={`px-4 py-2 rounded-full border text-sm transition-colors ${activePage === 'download'
+                                                                ? `${theme.activeTab} border-white/30`
+                                                                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}
+                                                >
+                                                        {t('downloadTab')}
+                                                </button>
+                                                <button
+                                                        onClick={() => setActivePage('queueHistory')}
+                                                        className={`px-4 py-2 rounded-full border text-sm transition-colors ${activePage === 'queueHistory'
+                                                                ? `${theme.activeTab} border-white/30`
+                                                                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}
+                                                >
+                                                        {t('queueHistoryTab')}
+                                                </button>
+                                        </div>
+                                </motion.div>
 
-				<div className="flex-1 flex flex-col gap-6 min-h-0 overflow-y-auto custom-scrollbar pb-4">
-					{/* Top Panel - Controls */}
-					<motion.div
-						initial={{ opacity: 0, y: -20 }}
-						animate={{ opacity: 1, y: 0 }}
-						className="flex-1 min-h-0 flex flex-col"
-					>
+                                <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
+                                        {activePage === 'download' ? (
+                                                <motion.div
+                                                        initial={{ opacity: 0, y: -20 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        className="flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar pb-4"
+                                                >
 						<div className="glass rounded-3xl p-5 shadow-2xl flex flex-col gap-4 flex-1">
 							{binariesExist === false && (
 								<div className={`bg-red-500/10 border ${theme.border} text-red-400 p-3 rounded-xl flex items-center gap-3 text-xs shrink-0`}>
@@ -976,11 +989,11 @@ function App() {
 
 							<div className="mt-auto pt-2 shrink-0 space-y-3">
 
-								<div className="flex gap-2">
-									<motion.button
-										whileHover={{ scale: 1.01, boxShadow: "0 0 30px rgba(168, 85, 247, 0.4)" }}
-										whileTap={{ scale: 0.99 }}
-										onClick={handleDownload}
+                                                                <div className="flex gap-2">
+                                                                        <motion.button
+                                                                                whileHover={{ scale: 1.01, boxShadow: "0 0 30px rgba(168, 85, 247, 0.4)" }}
+                                                                                whileTap={{ scale: 0.99 }}
+                                                                                onClick={handleDownload}
 										disabled={isDownloading || !url || !location || binariesExist === false}
 										className={`relative flex-1 py-3 rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-all overflow-hidden ${isDownloading
 											? 'bg-white/5 cursor-not-allowed text-gray-300 border border-white/10'
@@ -1010,13 +1023,31 @@ function App() {
 													<span className="text-xs opacity-60 ml-1">({isMac ? '⌘' : 'Ctrl'}+Enter)</span>
 												</>
 											)}
-										</span>
-									</motion.button>
+                                                                                </span>
+                                                                        </motion.button>
 
-									{isDownloading && (
-										<motion.button
-											initial={{ width: 0, opacity: 0 }}
-											animate={{ width: 'auto', opacity: 1 }}
+                                                                        <motion.button
+                                                                                whileHover={{ scale: 1.05 }}
+                                                                                whileTap={{ scale: 0.97 }}
+                                                                                onClick={handleAddToQueue}
+                                                                                disabled={!url || !location || binariesExist === false}
+                                                                                className={`px-4 rounded-2xl border transition-all flex items-center gap-2 text-sm font-medium ${!url || !location || binariesExist === false
+                                                                                        ? 'bg-white/5 border-white/10 text-gray-400 cursor-not-allowed'
+                                                                                        : 'bg-white/10 border-white/20 text-white hover:bg-white/15'}`}
+                                                                        >
+                                                                                <ListPlus size={18} />
+                                                                                {isDownloading ? t('addToQueue') : t('queueDownload')}
+                                                                                {downloadQueue.length > 0 && (
+                                                                                        <span className="ml-1 px-2 py-0.5 rounded-full bg-white/10 text-xs text-gray-200">
+                                                                                                {downloadQueue.length}
+                                                                                        </span>
+                                                                                )}
+                                                                        </motion.button>
+
+                                                                        {isDownloading && (
+                                                                                <motion.button
+                                                                                        initial={{ width: 0, opacity: 0 }}
+                                                                                        animate={{ width: 'auto', opacity: 1 }}
 											exit={{ width: 0, opacity: 0 }}
 											whileHover={{ scale: 1.05 }}
 											whileTap={{ scale: 0.95 }}
@@ -1029,11 +1060,11 @@ function App() {
 									)}
 								</div>
 
-								{/* Download Progress Details */}
-								<AnimatePresence>
-									{isDownloading && (downloadSpeed || downloadedSize || eta) && (
-										<motion.div
-											initial={{ opacity: 0, height: 0 }}
+                                                                {/* Download Progress Details */}
+                                                                <AnimatePresence>
+                                                                        {isDownloading && (downloadSpeed || downloadedSize || eta) && (
+                                                                                <motion.div
+                                                                                        initial={{ opacity: 0, height: 0 }}
 											animate={{ opacity: 1, height: 'auto' }}
 											exit={{ opacity: 0, height: 0 }}
 											className="overflow-hidden"
@@ -1061,13 +1092,28 @@ function App() {
 														<span className="text-white font-medium">{eta}</span>
 													</div>
 												)}
-											</div>
-										</motion.div>
-									)}
-								</AnimatePresence>
+                                                                                        </div>
+                                                                                </motion.div>
+                                                                        )}
+                                                                </AnimatePresence>
 
-								{/* Console Toggle & Output */}
-								<div className="space-y-2">
+                                                                <div className="flex items-center justify-between text-xs text-gray-300">
+                                                                        <div className="flex items-center gap-2">
+                                                                                <History size={14} className="text-amber-400" />
+                                                                                <span>{t('queueCount', { count: String(downloadQueue.length) })}</span>
+                                                                        </div>
+
+                                                                        <button
+                                                                                onClick={() => setActivePage('queueHistory')}
+                                                                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 transition"
+                                                                        >
+                                                                                <ClipboardList size={14} />
+                                                                                <span>{t('viewQueue')}</span>
+                                                                        </button>
+                                                                </div>
+
+                                                                {/* Console Toggle & Output */}
+                                                                <div className="space-y-2">
 									<div className="flex items-center justify-between">
 										<button
 											onClick={() => setShowConsole(!showConsole)}
@@ -1160,36 +1206,111 @@ function App() {
 									</AnimatePresence>
 								</div>
 							</div>
-						</div>
-					</motion.div>
+                                                </div>
+                                        </motion.div>
+                                        ) : (
+                                                <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-4 space-y-4">
+                                                        <div className="glass rounded-3xl border border-white/10 shadow-2xl p-6 space-y-4">
+                                                                <div className="flex items-center justify-between">
+                                                                        <div className="flex items-center gap-2 text-lg font-semibold text-white">
+                                                                                <ClipboardList size={20} className="text-amber-400" />
+                                                                                <span>{t('queueManagerTitle')}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2 text-xs text-gray-400">
+                                                                                <History size={14} className="text-amber-300" />
+                                                                                <span>{t('queueCount', { count: String(downloadQueue.length) })}</span>
+                                                                        </div>
+                                                                </div>
 
+                                                                <div className="space-y-3 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+                                                                        {downloadQueue.length === 0 ? (
+                                                                                <div className="flex flex-col items-center justify-center text-gray-400 py-8 gap-2">
+                                                                                        <ClipboardList size={32} className="text-white/30" />
+                                                                                        <span>{t('queueEmpty')}</span>
+                                                                                </div>
+                                                                        ) : (
+                                                                                downloadQueue.map((item, index) => (
+                                                                                        <div
+                                                                                                key={`${item.url}-${index}`}
+                                                                                                className="flex items-start gap-3 p-3 rounded-2xl bg-white/5 border border-white/10"
+                                                                                        >
+                                                                                                <div className="text-xs text-gray-400 w-10 shrink-0">
+                                                                                                        #{index + 1}
+                                                                                                </div>
+                                                                                                <div className="flex-1 min-w-0">
+                                                                                                        <div className="text-sm text-white break-all font-medium">
+                                                                                                                {item.url}
+                                                                                                        </div>
+                                                                                                        {item.subfolder && (
+                                                                                                                <div className="text-xs text-gray-400 mt-1">
+                                                                                                                        {t('queueSubfolder', { subfolder: item.subfolder })}
+                                                                                                                </div>
+                                                                                                        )}
+                                                                                                </div>
+                                                                                                <div className="flex items-center gap-1">
+                                                                                                        <button
+                                                                                                                onClick={() => handleMoveQueueItem(index, 'up')}
+                                                                                                                disabled={index === 0}
+                                                                                                                className="p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                                                                aria-label={t('moveUp')}
+                                                                                                        >
+                                                                                                                <ArrowUp size={16} />
+                                                                                                        </button>
+                                                                                                        <button
+                                                                                                                onClick={() => handleMoveQueueItem(index, 'down')}
+                                                                                                                disabled={index === downloadQueue.length - 1}
+                                                                                                                className="p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                                                                aria-label={t('moveDown')}
+                                                                                                        >
+                                                                                                                <ArrowDown size={16} />
+                                                                                                        </button>
+                                                                                                        <button
+                                                                                                                onClick={() => handleRemoveQueueItem(index)}
+                                                                                                                className="p-2 rounded-full hover:bg-red-500/20 text-red-300 hover:text-red-200"
+                                                                                                                aria-label={t('removeFromQueue')}
+                                                                                                        >
+                                                                                                                <Trash2 size={16} />
+                                                                                                        </button>
+                                                                                                </div>
+                                                                                        </div>
+                                                                                ))
+                                                                        )}
+                                                                </div>
 
+                                                                <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/10">
+                                                                        <button
+                                                                                onClick={handleClearQueue}
+                                                                                disabled={downloadQueue.length === 0}
+                                                                                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 border border-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                        >
+                                                                                <Trash2 size={16} />
+                                                                                <span>{t('clearQueue')}</span>
+                                                                        </button>
 
-				</div>
+                                                                        <button
+                                                                                onClick={() => setActivePage('download')}
+                                                                                className="px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 border border-white/20"
+                                                                        >
+                                                                                {t('downloadTab')}
+                                                                        </button>
+                                                                </div>
+                                                        </div>
 
-				{/* History Panel - Fixed at bottom */}
-				<AnimatePresence>
-					{showHistory && (
-						<motion.div
-							initial={{ opacity: 0, height: 0 }}
-							animate={{ opacity: 1, height: 'auto' }}
-							exit={{ opacity: 0, height: 0 }}
-							className="w-full shrink-0 overflow-hidden pt-4"
-						>
-							<div className="glass rounded-3xl p-4 shadow-2xl">
-								<DownloadHistory
-									history={downloadHistory}
-									onClearHistory={handleClearHistory}
-									onRemoveItem={handleRemoveHistoryItem}
-								/>
-							</div>
-						</motion.div>
-					)}
-				</AnimatePresence>
+                                                        <div className="glass rounded-3xl border border-white/10 shadow-2xl p-4">
+                                                                <DownloadHistory
+                                                                        history={downloadHistory}
+                                                                        onClearHistory={handleClearHistory}
+                                                                        onRemoveItem={handleRemoveHistoryItem}
+                                                                />
+                                                        </div>
+                                                </div>
+                                        )}
 
-				<SettingsModal
-					isOpen={isSettingsOpen}
-					onClose={() => setIsSettingsOpen(false)}
+                                </div>
+
+                                <SettingsModal
+                                        isOpen={isSettingsOpen}
+                                        onClose={() => setIsSettingsOpen(false)}
 					presets={presets}
 					onSavePreset={handleSavePreset}
 					onDeletePreset={handleDeletePreset}
