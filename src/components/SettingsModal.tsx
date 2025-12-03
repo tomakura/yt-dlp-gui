@@ -594,7 +594,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													</div>
 													<div>
 														<h4 className="text-xl font-bold text-white">yt-dlp-gui</h4>
-														<p className="text-sm text-gray-400">Version 1.1.0</p>
+														<p className="text-sm text-gray-400">Version 1.2.0</p>
 													</div>
 												</div>
 
