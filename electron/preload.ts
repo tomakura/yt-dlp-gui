@@ -3,6 +3,7 @@ import type { DownloadPayload, DownloadResult, BinaryUpdateProgress, VideoInfoRe
 
 contextBridge.exposeInMainWorld('electron', {
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
+  openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   getDefaultDownloadPath: () => ipcRenderer.invoke('get-default-download-path'),
   checkBinaries: () => ipcRenderer.invoke('check-binaries'),
   getBinaryVersions: () => ipcRenderer.invoke('get-binary-versions'),

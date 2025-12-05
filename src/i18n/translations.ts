@@ -9,13 +9,17 @@ export const translations = {
     cancel: 'キャンセル',
     settings: '設定',
     history: '履歴',
-    
+    downloadTab: 'ダウンロード設定',
+    queueHistoryTab: 'キュー＆履歴',
+
     // URL Input
     downloadUrl: 'ダウンロードURL',
     urlPlaceholder: 'https://www.youtube.com/watch?v=...',
     paste: '貼り付け',
     clipboardMonitoring: 'クリップボード監視',
-    
+    importFile: 'ファイルからインポート',
+    importFileTooltip: 'テキストファイル(.txt)からURLを一括読み込み',
+
     // Format Selector
     video: '動画',
     audio: '音声',
@@ -27,7 +31,7 @@ export const translations = {
     bitDepth: 'ビット深度',
     best: '最高',
     auto: '自動',
-    
+
     // Video Conversion
     conversionOptions: '変換オプション',
     enableConversion: '変換を有効化',
@@ -36,7 +40,7 @@ export const translations = {
     videoBitrate: '動画ビットレート',
     audioBitrateConv: '音声ビットレート',
     copy: 'コピー (無変換)',
-    
+
     // Location Selector
     saveTo: '保存先',
     selectFolder: 'フォルダを選択',
@@ -46,7 +50,7 @@ export const translations = {
     addToFavorites: 'お気に入りに追加',
     removeFromFavorites: 'お気に入りから削除',
     noFavorites: 'お気に入りフォルダがありません',
-    
+
     // Advanced Options
     advancedOptions: '詳細オプション',
     embedThumbnail: 'サムネイルを埋め込み',
@@ -64,13 +68,16 @@ export const translations = {
     notAvailableInAudioMode: '音声モードでは利用できません',
     customArgs: 'カスタム引数',
     customArgsPlaceholder: '例: --no-playlist',
-    
+    timeRange: '時間指定切り抜き',
+    startTime: '開始時間',
+    endTime: '終了時間',
+
     // Status
     idle: '待機中',
     downloadComplete: 'ダウンロードが完了しました',
     downloadError: 'エラーが発生しました',
     downloadCancelled: 'キャンセルしました',
-    
+
     // Settings Modal
     settingsTitle: '設定',
     general: '一般',
@@ -78,7 +85,7 @@ export const translations = {
     binaries: 'バイナリ',
     presets: 'プリセット',
     info: '情報',
-    
+
     // General Settings
     generalSettings: '一般設定',
     generalSettingsDesc: '基本的なアプリケーションの動作設定',
@@ -87,12 +94,14 @@ export const translations = {
     templateDefault: 'デフォルト',
     templateWithDate: '日付付き',
     templateWithUploader: '投稿者付き',
-    
+    enableNotifications: 'システム通知を有効化',
+    enableNotificationsDesc: 'ダウンロード完了時やエラー時にOSの通知を表示します',
+
     // Appearance Settings
     theme: 'テーマ',
     appearanceSettings: '外観設定',
     appearanceSettingsDesc: 'テーマとビジュアルのカスタマイズ',
-    
+
     // Binary Settings
     binaryManagement: 'バイナリ管理',
     binaryDescription: 'yt-dlp および ffmpeg の管理',
@@ -108,14 +117,14 @@ export const translations = {
     updateFfmpeg: 'ffmpegを更新',
     downloadBinaries: 'バイナリを自動ダウンロード',
     cancelDownload: 'キャンセル',
-    
+
     // Preset Settings
     presetManagement: 'プリセット管理',
     presetDescription: 'よく使う設定を保存・読み込み',
     presetNamePlaceholder: 'プリセット名 (例: 高画質保存)',
     save: '保存',
     noPresets: 'プリセットがありません',
-    
+
     // Info Tab
     appInfo: 'アプリケーション情報',
     appVersion: 'アプリバージョン',
@@ -126,16 +135,16 @@ export const translations = {
     upToDate: '最新バージョンを使用中です',
     openDownloadPage: 'ダウンロードページを開く',
     updateCheckFailed: '更新の確認に失敗しました',
-    
+
     // Ko-fi
     supportDevelopment: '開発を支援する',
     supportOnKofi: 'Ko-fiでサポート',
-    
+
     // Disclaimer
     disclaimer: '免責事項',
     disclaimerText: 'このアプリケーションは、ユーザーが自身の責任において使用することを前提としています。本ソフトウェアの使用により生じたいかなる損害、トラブル、法的責任について、制作者は一切の責任を負いません。著作権法および関連法規を遵守し、私的利用の範囲内でご使用ください。',
     aiDisclaimer: 'このアプリケーションは、AIを使用したアプリケーション作成テストとして作成されました。',
-    
+
     // History
     downloadHistory: 'ダウンロード履歴',
     noHistory: '履歴はありません',
@@ -148,16 +157,29 @@ export const translations = {
     daysAgo: '{days}日前',
     titleUnknown: 'タイトル不明',
     items: '件',
-    
+
     // Logs
     logs: 'ログ',
     clearLogs: 'ログをクリア',
-    
+
     // App Main
     appSubtitle: '高機能動画ダウンローダー',
     preset: 'プリセット',
     binaryNotFound: 'バイナリ (yt-dlp/ffmpeg) がアプリケーションフォルダに見つかりません。設定からダウンロードしてください。',
     startDownload: 'ダウンロード開始',
+    queueDownload: 'キューに追加',
+    addToQueue: 'キューに追加',
+    queuedForDownload: '{url} をキューに追加しました',
+    startingQueuedDownload: 'キューから開始: {url}',
+    queueCount: 'キュー: {count}件',
+    viewQueue: 'キューを表示',
+    queueManagerTitle: 'キュー管理',
+    queueEmpty: 'キューは空です',
+    moveUp: '一つ上へ',
+    moveDown: '一つ下へ',
+    removeFromQueue: 'キューから削除',
+    clearQueue: 'キューをクリア',
+    queueSubfolder: 'サブフォルダ: {subfolder}',
     processing: '処理中...',
     selectDestination: '保存先フォルダを選択してください。',
     startingDownload: '🚀 ダウンロードプロセスを開始します...',
@@ -183,10 +205,15 @@ export const translations = {
     startingBinaryDownload: 'バイナリのダウンロードを開始します...',
     binaryDownloadComplete: 'バイナリのダウンロードとセットアップが完了しました。',
     binaryDownloadFailed: 'バイナリのダウンロードに失敗しました。',
+    statusDownloadingYtDlp: 'yt-dlpをダウンロード中...',
+    statusDownloadingFfmpeg: 'ffmpegをダウンロード中...',
+    statusExtracting: '展開中...',
+    statusCleaningUp: 'クリーンアップ中...',
+    statusYtDlpDownloadComplete: 'yt-dlpのダウンロード完了',
     writeAutoSubtitles: '自動字幕を書き出し',
     playlistAuto: '自動',
     cookiesNone: '使用しない',
-    
+
     // Video Preview
     fetchingVideoInfo: '動画情報を取得中...',
     views: '回視聴',
@@ -195,16 +222,17 @@ export const translations = {
     next: '次へ',
     videoInfoError: '動画情報の取得に失敗しました',
     videoInfo: '動画情報',
+    refresh: '更新',
     enterValidUrl: '有効なURLを入力してください',
     unsupportedUrl: '対応していないURLです',
     noVideoFound: '動画が見つかりませんでした',
     bestQuality: '最高画質',
-    
+
     // Download Progress
     downloadSpeed: 'ダウンロード速度',
     downloadedSize: 'ダウンロード済み',
     remainingTime: '残り時間',
-    
+
     // Hardware Encoding
     hardwareEncoder: 'ハードウェアエンコーダー',
     softwareEncoder: 'ソフトウェア（CPU）',
@@ -223,13 +251,17 @@ export const translations = {
     cancel: 'Cancel',
     settings: 'Settings',
     history: 'History',
-    
+    downloadTab: 'Download settings',
+    queueHistoryTab: 'Queue & History',
+
     // URL Input
     downloadUrl: 'Download URL',
     urlPlaceholder: 'https://www.youtube.com/watch?v=...',
     paste: 'Paste',
     clipboardMonitoring: 'Clipboard Monitoring',
-    
+    importFile: 'Import from File',
+    importFileTooltip: 'Batch import URLs from text file (.txt)',
+
     // Format Selector
     video: 'Video',
     audio: 'Audio',
@@ -241,7 +273,7 @@ export const translations = {
     bitDepth: 'Bit Depth',
     best: 'Best',
     auto: 'Auto',
-    
+
     // Video Conversion
     conversionOptions: 'Conversion Options',
     enableConversion: 'Enable Conversion',
@@ -250,7 +282,7 @@ export const translations = {
     videoBitrate: 'Video Bitrate',
     audioBitrateConv: 'Audio Bitrate',
     copy: 'Copy (No conversion)',
-    
+
     // Location Selector
     saveTo: 'Save to',
     selectFolder: 'Select Folder',
@@ -260,7 +292,7 @@ export const translations = {
     addToFavorites: 'Add to Favorites',
     removeFromFavorites: 'Remove from Favorites',
     noFavorites: 'No favorite folders',
-    
+
     // Advanced Options
     advancedOptions: 'Advanced Options',
     embedThumbnail: 'Embed Thumbnail',
@@ -278,13 +310,16 @@ export const translations = {
     notAvailableInAudioMode: 'Not available in audio mode',
     customArgs: 'Custom Arguments',
     customArgsPlaceholder: 'e.g., --no-playlist',
-    
+    timeRange: 'Time Range Cut',
+    startTime: 'Start Time',
+    endTime: 'End Time',
+
     // Status
     idle: 'Idle',
     downloadComplete: 'Download complete',
     downloadError: 'An error occurred',
     downloadCancelled: 'Cancelled',
-    
+
     // Settings Modal
     settingsTitle: 'Settings',
     general: 'General',
@@ -292,7 +327,7 @@ export const translations = {
     binaries: 'Binaries',
     presets: 'Presets',
     info: 'Info',
-    
+
     // General Settings
     generalSettings: 'General Settings',
     generalSettingsDesc: 'Basic application behavior settings',
@@ -301,12 +336,14 @@ export const translations = {
     templateDefault: 'Default',
     templateWithDate: 'With Date',
     templateWithUploader: 'With Uploader',
-    
+    enableNotifications: 'Enable System Notifications',
+    enableNotificationsDesc: 'Show OS notifications on download complete or error',
+
     // Appearance Settings
     theme: 'Theme',
     appearanceSettings: 'Appearance Settings',
     appearanceSettingsDesc: 'Customize theme and visuals',
-    
+
     // Binary Settings
     binaryManagement: 'Binary Management',
     binaryDescription: 'Manage yt-dlp and ffmpeg',
@@ -322,14 +359,14 @@ export const translations = {
     updateFfmpeg: 'Update ffmpeg',
     downloadBinaries: 'Auto-download Binaries',
     cancelDownload: 'Cancel',
-    
+
     // Preset Settings
     presetManagement: 'Preset Management',
     presetDescription: 'Save and load frequently used settings',
     presetNamePlaceholder: 'Preset name (e.g., High Quality)',
     save: 'Save',
     noPresets: 'No presets',
-    
+
     // Info Tab
     appInfo: 'Application Info',
     appVersion: 'App Version',
@@ -340,16 +377,16 @@ export const translations = {
     upToDate: 'You are using the latest version',
     openDownloadPage: 'Open Download Page',
     updateCheckFailed: 'Failed to check for updates',
-    
+
     // Ko-fi
     supportDevelopment: 'Support Development',
     supportOnKofi: 'Support on Ko-fi',
-    
+
     // Disclaimer
     disclaimer: 'Disclaimer',
     disclaimerText: 'This application is intended to be used at your own risk. The developer is not responsible for any damages, troubles, or legal liabilities arising from the use of this software. Please comply with copyright laws and use within the scope of personal use.',
     aiDisclaimer: 'This application was created as an AI-assisted application development test.',
-    
+
     // History
     downloadHistory: 'Download History',
     noHistory: 'No history',
@@ -362,16 +399,29 @@ export const translations = {
     daysAgo: '{days} days ago',
     titleUnknown: 'Unknown Title',
     items: 'items',
-    
+
     // Logs
     logs: 'Logs',
     clearLogs: 'Clear Logs',
-    
+
     // App Main
     appSubtitle: 'Advanced Video Downloader',
     preset: 'Preset',
     binaryNotFound: 'Binaries (yt-dlp/ffmpeg) not found in application folder. Please download from settings.',
     startDownload: 'Start Download',
+    queueDownload: 'Add to Queue',
+    addToQueue: 'Add to Queue',
+    queuedForDownload: 'Queued: {url}',
+    startingQueuedDownload: 'Starting queued item: {url}',
+    queueCount: 'In queue: {count}',
+    viewQueue: 'View Queue',
+    queueManagerTitle: 'Queue Manager',
+    queueEmpty: 'Queue is empty',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
+    removeFromQueue: 'Remove from queue',
+    clearQueue: 'Clear queue',
+    queueSubfolder: 'Subfolder: {subfolder}',
     processing: 'Processing...',
     selectDestination: 'Please select a destination folder.',
     startingDownload: '🚀 Starting download process...',
@@ -397,10 +447,15 @@ export const translations = {
     startingBinaryDownload: 'Starting binary download...',
     binaryDownloadComplete: 'Binary download and setup complete.',
     binaryDownloadFailed: 'Binary download failed.',
+    statusDownloadingYtDlp: 'Downloading yt-dlp...',
+    statusDownloadingFfmpeg: 'Downloading ffmpeg...',
+    statusExtracting: 'Extracting...',
+    statusCleaningUp: 'Cleaning up...',
+    statusYtDlpDownloadComplete: 'yt-dlp download complete',
     writeAutoSubtitles: 'Write Auto Subtitles',
     playlistAuto: 'Auto',
     cookiesNone: 'Don\'t use',
-    
+
     // Video Preview
     fetchingVideoInfo: 'Fetching video info...',
     views: 'views',
@@ -409,16 +464,17 @@ export const translations = {
     next: 'Next',
     videoInfoError: 'Failed to fetch video info',
     videoInfo: 'Video Info',
+    refresh: 'Refresh',
     enterValidUrl: 'Please enter a valid URL',
     unsupportedUrl: 'Unsupported URL',
     noVideoFound: 'No video found',
     bestQuality: 'Best Quality',
-    
+
     // Download Progress
     downloadSpeed: 'Download speed',
     downloadedSize: 'Downloaded',
     remainingTime: 'Time remaining',
-    
+
     // Hardware Encoding
     hardwareEncoder: 'Hardware Encoder',
     softwareEncoder: 'Software (CPU)',

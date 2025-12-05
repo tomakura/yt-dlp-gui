@@ -27,8 +27,13 @@ export interface AdvancedOptionsState {
   embedSubs: boolean;
   writeAutoSub: boolean;
   splitChapters: boolean;
-  playlist: 'default' | 'single' | 'playlist';
-  cookiesBrowser: 'none' | 'chrome' | 'edge' | 'firefox';
+  playlist: 'default' | 'single' | 'all';
+  cookiesBrowser: 'none' | 'chrome' | 'firefox';
+  timeRange: {
+    enabled: boolean;
+    start: string;
+    end: string;
+  };
 }
 
 export interface DownloadHistoryItem {

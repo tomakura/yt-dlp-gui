@@ -28,32 +28,29 @@ const Toggle: React.FC<{
   const toggleActive = theme?.toggleActive || 'bg-purple-500';
   const toggleTrack = theme?.toggleTrack || 'bg-purple-500/20';
   const isGradient = toggleActive.includes('from-');
-  
+
   return (
     <button
       type="button"
       onClick={() => !disabled && onChange(!checked)}
       disabled={disabled}
-      className={`relative flex items-center justify-between text-[11px] px-3 py-2.5 rounded-xl border transition-all duration-200 ${
-        disabled 
-          ? 'opacity-40 cursor-not-allowed bg-white/5 border-white/5 text-gray-500' 
+      className={`relative flex items-center justify-between text-[11px] px-3 py-2.5 rounded-xl border transition-all duration-200 ${disabled
+          ? 'opacity-40 cursor-not-allowed bg-white/5 border-white/5 text-gray-500'
           : checked
             ? `${isGradient ? 'bg-gradient-to-r' : ''} ${toggleTrack} border-current/40 text-gray-200 shadow-lg`
             : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:border-white/20 hover:text-gray-200'
-      }`}
+        }`}
       title={tooltip}
     >
       <span className="font-medium">{label}</span>
-      <div className={`relative w-9 h-5 rounded-full transition-all duration-200 ${
-        checked 
-          ? `${isGradient ? 'bg-gradient-to-r' : ''} ${toggleActive}` 
+      <div className={`relative w-9 h-5 rounded-full transition-all duration-200 ${checked
+          ? `${isGradient ? 'bg-gradient-to-r' : ''} ${toggleActive}`
           : 'bg-white/20'
-      }`}>
-        <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-200 shadow-md ${
-          checked 
-            ? 'left-[18px] bg-white' 
+        }`}>
+        <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-200 shadow-md ${checked
+            ? 'left-[18px] bg-white'
             : 'left-0.5 bg-gray-400'
-        }`} />
+          }`} />
       </div>
     </button>
   );
@@ -82,30 +79,66 @@ export const AdvancedOptions: React.FC<AdvancedOptionsProps> = ({ options, setOp
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <Toggle label={t('embedThumbnail')} checked={options.embedThumbnail} onChange={(v) => update('embedThumbnail', v)} theme={themeStyles} />
         <Toggle label={t('embedMetadata')} checked={options.addMetadata} onChange={(v) => update('addMetadata', v)} theme={themeStyles} />
-        <Toggle 
-          label={t('embedSubtitles')} 
-          checked={options.embedSubs} 
-          onChange={(v) => update('embedSubs', v)} 
+        <Toggle
+          label={t('embedSubtitles')}
+          checked={options.embedSubs}
+          onChange={(v) => update('embedSubs', v)}
           disabled={isAudioMode}
           tooltip={isAudioMode ? t('audioModeWarning') : undefined}
           theme={themeStyles}
         />
-        <Toggle 
-          label={t('writeAutoSubtitles')} 
-          checked={options.writeAutoSub} 
+        <Toggle
+          label={t('writeAutoSubtitles')}
+          checked={options.writeAutoSub}
           onChange={(v) => update('writeAutoSub', v)}
           disabled={isAudioMode}
           tooltip={isAudioMode ? t('audioModeWarning') : undefined}
           theme={themeStyles}
         />
-        <Toggle 
-          label={t('splitChapters')} 
-          checked={options.splitChapters} 
+        <Toggle
+          label={t('splitChapters')}
+          checked={options.splitChapters}
           onChange={(v) => update('splitChapters', v)}
           disabled={isAudioMode}
           tooltip={isAudioMode ? t('audioModeWarning') : undefined}
           theme={themeStyles}
         />
+      </div>
+
+      <div className="space-y-3 pt-2 border-t border-white/5">
+        <div className="flex items-center justify-between">
+          <Toggle
+            label={t('timeRange')}
+            checked={options.timeRange?.enabled || false}
+            onChange={(v) => update('timeRange', { ...options.timeRange, enabled: v })}
+            theme={themeStyles}
+          />
+        </div>
+
+        {(options.timeRange?.enabled) && (
+          <div className="grid grid-cols-2 gap-3 pl-1">
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-400">{t('startTime')} (HH:MM:SS)</label>
+              <input
+                type="text"
+                value={options.timeRange?.start || ''}
+                onChange={(e) => update('timeRange', { ...options.timeRange, start: e.target.value })}
+                placeholder="00:00:00"
+                className="w-full glass-input rounded-lg px-2 py-1.5 text-xs text-gray-200 bg-[#0b0b0b] font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-400">{t('endTime')} (HH:MM:SS)</label>
+              <input
+                type="text"
+                value={options.timeRange?.end || ''}
+                onChange={(e) => update('timeRange', { ...options.timeRange, end: e.target.value })}
+                placeholder="00:01:00"
+                className="w-full glass-input rounded-lg px-2 py-1.5 text-xs text-gray-200 bg-[#0b0b0b] font-mono"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">

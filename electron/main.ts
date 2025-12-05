@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, net } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, net, Notification } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import https from 'https';
@@ -64,9 +64,15 @@ interface DownloadPayload {
     splitChapters: boolean;
     playlist: 'default' | 'single' | 'playlist';
     cookiesBrowser: 'none' | 'chrome' | 'edge' | 'firefox';
+    timeRange?: {
+      enabled: boolean;
+      start: string;
+      end: string;
+    };
   };
   videoConversion?: VideoConversionOptions;
   outputTemplate: string;
+  notificationsEnabled: boolean;
 }
 
 const isWindows = process.platform === 'win32';
@@ -97,7 +103,7 @@ const commandExists = (cmd: string): boolean => {
   try {
     if (isWindows) {
       // On Windows, use 'where' command to check if executable exists in PATH
-      const result = spawnSync('where', [cmd], { 
+      const result = spawnSync('where', [cmd], {
         windowsHide: true,
         shell: true,
         stdio: 'pipe',
@@ -106,7 +112,7 @@ const commandExists = (cmd: string): boolean => {
       return result.status === 0;
     } else {
       // On Unix-like systems, try running the command
-      const result = spawnSync(cmd, ['--version'], { 
+      const result = spawnSync(cmd, ['--version'], {
         windowsHide: true,
         stdio: 'pipe'
       });
@@ -123,7 +129,7 @@ const resolveYtDlpPath = () => {
   ensureAppPath();
   const bundled = path.join(appPath, isWindows ? 'yt-dlp.exe' : 'yt-dlp');
   if (fs.existsSync(bundled)) return bundled;
-  
+
   if (ytDlpBinaryPath && fs.existsSync(ytDlpBinaryPath)) return ytDlpBinaryPath;
   return commandExists('yt-dlp') ? 'yt-dlp' : null;
 };
@@ -153,15 +159,15 @@ let isDownloadCancelled = false;
 const downloadFile = (url: string, destination: string, onProgress?: (percent: number, downloaded: number, total: number, speed: number) => void) =>
   new Promise<void>((resolve, reject) => {
     ensureAppPath();
-    
+
     const makeRequest = (requestUrl: string) => {
       const file = fs.createWriteStream(destination);
-      
+
       const req = https.get(requestUrl, (res: any) => {
         // Handle redirects
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           file.close();
-          fs.unlink(destination, () => {}); // Clean up empty file
+          fs.unlink(destination, () => { }); // Clean up empty file
           let redirectUrl = res.headers.location;
           if (redirectUrl.startsWith('/')) {
             const parsedUrl = new URL(requestUrl);
@@ -175,7 +181,7 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
           makeRequest(redirectUrl);
           return;
         }
-        
+
         if (res.statusCode && res.statusCode >= 400) {
           file.close();
           reject(new Error(`HTTP Error: ${res.statusCode}`));
@@ -191,12 +197,12 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
         res.on('data', (chunk: Buffer) => {
           downloaded += chunk.length;
           const now = Date.now();
-          
+
           // Update every 100ms to avoid excessive IPC
           if (now - lastUpdate > 100 || downloaded === totalSize) {
             const elapsed = (now - startTime) / 1000; // seconds
             const speed = elapsed > 0 ? downloaded / elapsed : 0; // bytes/sec
-            
+
             if (onProgress) {
               if (totalSize > 0) {
                 onProgress(Math.round((downloaded / totalSize) * 100), downloaded, totalSize, speed);
@@ -223,7 +229,7 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
           });
         });
       });
-      
+
       req.on('error', (err) => {
         file.close();
         // Only unlink if file exists to avoid ENOENT
@@ -240,7 +246,7 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
           req.destroy();
           file.close();
           if (fs.existsSync(destination)) {
-            fs.unlink(destination, () => {});
+            fs.unlink(destination, () => { });
           }
           reject(new Error('Download cancelled'));
         });
@@ -253,7 +259,7 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
 const downloadYtDlp = async (onProgress?: (percent: number, downloaded: number, total: number, speed: number) => void) => {
   const isMac = process.platform === 'darwin';
   const target = path.join(appPath, isWindows ? 'yt-dlp.exe' : 'yt-dlp');
-  
+
   let url: string;
   if (isWindows) {
     url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
@@ -264,9 +270,9 @@ const downloadYtDlp = async (onProgress?: (percent: number, downloaded: number, 
     // Linux - use the Python zipapp
     url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
   }
-  
+
   await downloadFile(url, target, onProgress);
-  
+
   // Set executable permission and remove quarantine on macOS
   if (!isWindows) {
     await fs.promises.chmod(target, 0o755);
@@ -278,29 +284,29 @@ const downloadYtDlp = async (onProgress?: (percent: number, downloaded: number, 
       }
     }
   }
-  
+
   onProgress?.(100, 0, 0, 0);
   return target;
 };
 
-const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number, total: number, speed: number) => void, onStatus?: (status: string) => void) => {
+const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number, total: number, speed: number) => void, onStatus?: (statusKey: string) => void) => {
   const isMac = process.platform === 'darwin';
   const isLinux = process.platform === 'linux';
-  
+
   const ffmpegTarget = path.join(appPath, isWindows ? 'ffmpeg.exe' : 'ffmpeg');
   const ffprobeTarget = path.join(appPath, isWindows ? 'ffprobe.exe' : 'ffprobe');
-  
+
   // For macOS, use ffbinaries (GitHub Releases) for faster download
   // Note: Currently using x64 builds which work on ARM64 via Rosetta 2
   if (isMac) {
     try {
-      onStatus?.('Downloading ffmpeg and ffprobe (GitHub)...');
-      
+      onStatus?.('statusDownloadingFfmpeg');
+
       // Using ffbinaries v6.1
       const version = '6.1';
       const ffmpegUrl = `https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v${version}/ffmpeg-${version}-macos-64.zip`;
       const ffprobeUrl = `https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v${version}/ffprobe-${version}-macos-64.zip`;
-      
+
       const ffmpegZip = path.join(appPath, 'ffmpeg.zip');
       const ffprobeZip = path.join(appPath, 'ffprobe.zip');
 
@@ -311,13 +317,13 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         const downloaded = ffmpegState.downloaded + ffprobeState.downloaded;
         const total = ffmpegState.total + ffprobeState.total;
         const speed = ffmpegState.speed + ffprobeState.speed;
-        
+
         if (total > 0) {
           const percent = Math.round((downloaded / total) * 100);
           // Map 0-100% download to 0-80% overall
           onProgress?.(Math.round(percent * 0.8), downloaded, total, speed);
         } else if (downloaded > 0) {
-           onProgress?.(-1, downloaded, 0, speed);
+          onProgress?.(-1, downloaded, 0, speed);
         }
       };
 
@@ -332,11 +338,11 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
       });
 
       await Promise.all([p1, p2]);
-      
+
       // Extract (80-100%)
-      onStatus?.('Extracting ffmpeg/ffprobe...');
+      onStatus?.('statusExtracting');
       onProgress?.(85, 0, 0, 0);
-      
+
       await Promise.all([
         execAsync(`unzip -o "${ffmpegZip}" -d "${appPath}"`),
         execAsync(`unzip -o "${ffprobeZip}" -d "${appPath}"`)
@@ -344,14 +350,14 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
 
       if (fs.existsSync(ffmpegZip)) fs.unlinkSync(ffmpegZip);
       if (fs.existsSync(ffprobeZip)) fs.unlinkSync(ffprobeZip);
-      
+
       if (fs.existsSync(ffmpegTarget)) {
         fs.chmodSync(ffmpegTarget, 0o755);
         // Remove quarantine attribute on macOS
         if (isMac) {
           try {
-            execAsync(`xattr -d com.apple.quarantine "${ffmpegTarget}"`).catch(() => {});
-          } catch (e) {}
+            execAsync(`xattr -d com.apple.quarantine "${ffmpegTarget}"`).catch(() => { });
+          } catch (e) { }
         }
       }
       if (fs.existsSync(ffprobeTarget)) {
@@ -359,20 +365,20 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         // Remove quarantine attribute on macOS
         if (isMac) {
           try {
-            execAsync(`xattr -d com.apple.quarantine "${ffprobeTarget}"`).catch(() => {});
-          } catch (e) {}
+            execAsync(`xattr -d com.apple.quarantine "${ffprobeTarget}"`).catch(() => { });
+          } catch (e) { }
         }
       }
-      
+
       onProgress?.(100, 0, 0, 0);
-      
+
       return ffmpegTarget;
     } catch (e) {
       console.error('Failed to download ffmpeg for macOS:', e);
       throw e;
     }
   }
-  
+
   // Download ffmpeg and ffprobe from yt-dlp's FFmpeg builds (Windows/Linux)
   let url = '';
   if (isWindows) {
@@ -380,16 +386,16 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
   } else if (isLinux) {
     url = 'https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz';
   }
-  
+
   if (!url) {
     throw new Error('Unsupported platform for ffmpeg download');
   }
-  
+
   // For Windows/Linux, download and extract
   const tempFile = path.join(appPath, isWindows ? 'ffmpeg-temp.zip' : 'ffmpeg-temp.tar.xz');
-  
+
   try {
-    onStatus?.('Downloading ffmpeg...');
+    onStatus?.('statusDownloadingFfmpeg');
     await downloadFile(url, tempFile, (p, downloaded, total, speed) => {
       if (p >= 0) {
         onProgress?.(Math.round(p * 0.8), downloaded, total, speed); // 0-80% for download
@@ -397,17 +403,24 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         onProgress?.(-1, downloaded, total, speed);
       }
     });
-    
-    onStatus?.('Extracting ffmpeg...');
+
+    onStatus?.('statusExtracting');
     onProgress?.(85, 0, 0, 0);
-    
+
     if (isWindows) {
-      // Extract zip on Windows using PowerShell
+      // Extract zip on Windows
       const extractDir = path.join(appPath, 'ffmpeg-extract');
-      
-      // Use PowerShell to extract the zip
-      await execAsync(`powershell -NoProfile -Command "Expand-Archive -Path '${tempFile}' -DestinationPath '${extractDir}' -Force"`);
-      
+      if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+
+      try {
+        // Try using tar first (much faster than PowerShell Expand-Archive)
+        await execAsync(`tar -xf "${tempFile}" -C "${extractDir}"`);
+      } catch (e) {
+        console.log('tar extraction failed, falling back to PowerShell', e);
+        // Use PowerShell to extract the zip
+        await execAsync(`powershell -NoProfile -Command "Expand-Archive -Path '${tempFile}' -DestinationPath '${extractDir}' -Force"`);
+      }
+
       // Find and move ffmpeg.exe and ffprobe.exe
       const findAndMove = async (dir: string) => {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -423,7 +436,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         }
       };
       await findAndMove(extractDir);
-      
+
       // Clean up extract directory
       fs.rmSync(extractDir, { recursive: true, force: true });
     } else if (isLinux) {
@@ -451,7 +464,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
           fs.rmSync(path.join(appPath, dir), { recursive: true, force: true });
         }
       }
-      
+
       if (fs.existsSync(ffmpegTarget)) {
         fs.chmodSync(ffmpegTarget, 0o755);
       }
@@ -459,17 +472,17 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         fs.chmodSync(ffprobeTarget, 0o755);
       }
     }
-    
+
     onProgress?.(95, 0, 0, 0);
-    onStatus?.('Cleaning up...');
-    
+    onStatus?.('statusCleaningUp');
+
     // Clean up temp file
     if (fs.existsSync(tempFile)) {
       fs.unlinkSync(tempFile);
     }
-    
+
     onProgress?.(100, 0, 0, 0);
-    
+
     return ffmpegTarget;
   } catch (e) {
     // Clean up on failure
@@ -488,7 +501,7 @@ const formatProgressDetails = (downloaded: number, total: number, speed: number)
   const mbDownloaded = (downloaded / 1024 / 1024).toFixed(1);
   const mbTotal = (total / 1024 / 1024).toFixed(1);
   const mbSpeed = (speed / 1024 / 1024).toFixed(1);
-  
+
   if (total > 0) {
     return `${mbDownloaded}MB / ${mbTotal}MB (${mbSpeed} MB/s)`;
   } else {
@@ -522,7 +535,12 @@ const createWindow = () => {
   }
 };
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.tomakura.ytdlpgui');
+  }
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -545,6 +563,23 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('open-file-dialog', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Text Files', extensions: ['txt'] }],
+  });
+  if (canceled || filePaths.length === 0) {
+    return null;
+  }
+  try {
+    const content = fs.readFileSync(filePaths[0], 'utf-8');
+    return { content, filePath: filePaths[0] };
+  } catch (e) {
+    console.error('Failed to read file:', e);
+    return null;
+  }
+});
+
 ipcMain.handle('get-default-download-path', () => {
   return app.getPath('downloads');
 });
@@ -555,33 +590,33 @@ const fetchJson = (url: string): Promise<any> => {
       url,
       method: 'GET'
     });
-    
+
     request.setHeader('User-Agent', 'yt-dlp-gui/1.0.0');
     request.setHeader('Accept', 'application/vnd.github.v3+json');
-    
+
     let data = '';
-    
+
     request.on('response', (response) => {
       // Handle redirects
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        const location = Array.isArray(response.headers.location) 
-          ? response.headers.location[0] 
+        const location = Array.isArray(response.headers.location)
+          ? response.headers.location[0]
           : response.headers.location;
         fetchJson(location).then(resolve).catch(reject);
         return;
       }
-      
+
       // Check for non-2xx status codes
       if (response.statusCode < 200 || response.statusCode >= 300) {
         console.error(`fetchJson failed: ${url} returned status ${response.statusCode}`);
         reject(new Error(`HTTP ${response.statusCode}`));
         return;
       }
-      
+
       response.on('data', (chunk) => {
         data += chunk.toString();
       });
-      
+
       response.on('end', () => {
         try {
           resolve(JSON.parse(data));
@@ -590,18 +625,18 @@ const fetchJson = (url: string): Promise<any> => {
           reject(e);
         }
       });
-      
+
       response.on('error', (error) => {
         console.error(`fetchJson response error for ${url}:`, error);
         reject(error);
       });
     });
-    
+
     request.on('error', (error) => {
       console.error(`fetchJson request error for ${url}:`, error);
       reject(error);
     });
-    
+
     request.end();
   });
 };
@@ -621,7 +656,7 @@ ipcMain.handle('get-latest-binary-versions', async () => {
 
   // Determine ffmpeg source based on platform
   const isMac = process.platform === 'darwin';
-  
+
   if (isMac) {
     // macOS uses ffbinaries
     try {
@@ -696,23 +731,21 @@ ipcMain.handle('check-binaries', async () => {
 ipcMain.handle('get-binary-versions', async () => {
   const ytDlpPath = resolveYtDlpPath();
   const ffmpegPath = resolveFfmpegPath();
-  
+
   let ytDlpVersion = 'Not detected';
   let ffmpegVersion = 'Not detected';
 
   if (ytDlpPath) {
     try {
-      // Don't use shell: true on macOS as it can cause issues with paths
-      const result = spawnSync(ytDlpPath, ['--version'], {
+      // Use async exec instead of spawnSync to avoid blocking
+      // Quote path to handle spaces
+      const { stdout } = await execAsync(`"${ytDlpPath}" --version`, {
         windowsHide: true,
-        shell: isWindows, // Only use shell on Windows
         encoding: 'utf-8',
         timeout: 10000
       });
-      if (result.status === 0 && result.stdout) {
-        ytDlpVersion = result.stdout.trim();
-      } else if (result.stderr) {
-        console.error('yt-dlp version stderr:', result.stderr);
+      if (stdout) {
+        ytDlpVersion = stdout.trim();
       }
     } catch (e) {
       console.error('Error getting yt-dlp version:', e);
@@ -721,15 +754,14 @@ ipcMain.handle('get-binary-versions', async () => {
 
   if (ffmpegPath) {
     try {
-      const result = spawnSync(ffmpegPath, ['-version'], {
+      const { stdout } = await execAsync(`"${ffmpegPath}" -version`, {
         windowsHide: true,
-        shell: isWindows, // Only use shell on Windows
         encoding: 'utf-8',
         timeout: 10000
       });
-      if (result.status === 0 && result.stdout) {
+      if (stdout) {
         // ffmpeg version output is verbose, usually first line: "ffmpeg version 4.4.1 ..." or "ffmpeg version N-121938-g..."
-        const firstLine = result.stdout.split('\n')[0];
+        const firstLine = stdout.split('\n')[0];
         const match = firstLine.match(/ffmpeg version (\S+)/);
         if (match) {
           let version = match[1];
@@ -757,18 +789,15 @@ ipcMain.handle('update-ytdlp', async (event) => {
   try {
     binaryDownloadController = new AbortController();
     const [window] = BrowserWindow.getAllWindows();
-    let currentStatus = 'Downloading yt-dlp...';
-    const sendProgress = (percent: number, status: string, downloaded?: number) => {
-      window?.webContents.send('binary-update-progress', { type: 'ytdlp', percent, status, downloaded });
+    const sendProgress = (percent: number, statusKey: string, progressData?: { downloaded: number, total: number, speed: number }) => {
+      window?.webContents.send('binary-update-progress', { type: 'ytdlp', percent, statusKey, progressData });
     };
-    sendProgress(0, currentStatus);
+    sendProgress(0, 'statusDownloadingYtDlp');
     await downloadYtDlp((percent, downloaded, total, speed) => {
       if (percent >= 0) {
-        const details = formatProgressDetails(downloaded, total, speed);
-        sendProgress(percent, `${currentStatus} ${percent}% - ${details}`, downloaded);
+        sendProgress(percent, 'statusDownloadingYtDlp', { downloaded, total, speed });
       } else if (downloaded) {
-        const details = formatProgressDetails(downloaded, 0, speed);
-        sendProgress(-1, `${currentStatus} ${details}`, downloaded);
+        sendProgress(-1, 'statusDownloadingYtDlp', { downloaded, total: 0, speed });
       }
     });
     binaryDownloadController = null;
@@ -791,24 +820,22 @@ ipcMain.handle('update-ffmpeg', async (event) => {
   try {
     binaryDownloadController = new AbortController();
     const [window] = BrowserWindow.getAllWindows();
-    let currentStatus = 'Downloading ffmpeg...';
-    const sendProgress = (percent: number, status: string, downloaded?: number) => {
-      window?.webContents.send('binary-update-progress', { type: 'ffmpeg', percent, status, downloaded });
+    let currentStatusKey = 'statusDownloadingFfmpeg';
+    const sendProgress = (percent: number, statusKey: string, progressData?: { downloaded: number, total: number, speed: number }) => {
+      window?.webContents.send('binary-update-progress', { type: 'ffmpeg', percent, statusKey, progressData });
     };
-    sendProgress(0, currentStatus);
+    sendProgress(0, currentStatusKey);
     await downloadFfmpeg(
       (percent, downloaded, total, speed) => {
         if (percent >= 0) {
-          const details = formatProgressDetails(downloaded, total, speed);
-          sendProgress(percent, `${currentStatus} ${percent}% - ${details}`, downloaded);
+          sendProgress(percent, currentStatusKey, { downloaded, total, speed });
         } else if (downloaded) {
-          const details = formatProgressDetails(downloaded, 0, speed);
-          sendProgress(-1, `${currentStatus} ${details}`, downloaded);
+          sendProgress(-1, currentStatusKey, { downloaded, total: 0, speed });
         }
       },
-      (status) => {
-        currentStatus = status;
-        sendProgress(-2, status); // -2 indicates status change only
+      (statusKey) => {
+        currentStatusKey = statusKey;
+        sendProgress(-2, statusKey); // -2 indicates status change only
       }
     );
     binaryDownloadController = null;
@@ -841,46 +868,42 @@ ipcMain.handle('download-binaries', async () => {
   try {
     binaryDownloadController = new AbortController();
     const [window] = BrowserWindow.getAllWindows();
-    let currentStatus = 'Downloading yt-dlp...';
-    
-    const sendProgress = (percent: number, status: string, downloaded?: number) => {
-      window?.webContents.send('binary-update-progress', { type: 'all', percent, status, downloaded });
+    let currentStatusKey = 'statusDownloadingYtDlp';
+
+    const sendProgress = (percent: number, statusKey: string, progressData?: { downloaded: number, total: number, speed: number }) => {
+      window?.webContents.send('binary-update-progress', { type: 'all', percent, statusKey, progressData });
     };
-    
-    sendProgress(0, currentStatus);
+
+    sendProgress(0, currentStatusKey);
 
     // 1. Download yt-dlp (0-20%)
     await downloadYtDlp((percent, downloaded, total, speed) => {
       if (percent >= 0) {
         // Map 0-100% to 0-20%
         const overallPercent = Math.round(percent * 0.2);
-        const details = formatProgressDetails(downloaded, total, speed);
-        sendProgress(overallPercent, `${currentStatus} ${percent}% - ${details}`, downloaded);
+        sendProgress(overallPercent, currentStatusKey, { downloaded, total, speed });
       } else if (downloaded) {
-        const details = formatProgressDetails(downloaded, 0, speed);
-        sendProgress(-1, `${currentStatus} ${details}`, downloaded);
+        sendProgress(-1, currentStatusKey, { downloaded, total: 0, speed });
       }
     });
-    
-    sendProgress(20, 'yt-dlp download complete');
+
+    sendProgress(20, 'statusYtDlpDownloadComplete');
 
     // 2. Download ffmpeg (20-100%)
-    currentStatus = 'Downloading ffmpeg...';
+    currentStatusKey = 'statusDownloadingFfmpeg';
     await downloadFfmpeg(
       (percent, downloaded, total, speed) => {
         if (percent >= 0) {
           // Map 0-100% to 20-100% (range of 80%)
           const overallPercent = 20 + Math.round(percent * 0.8);
-          const details = formatProgressDetails(downloaded, total, speed);
-          sendProgress(overallPercent, `${currentStatus} ${percent}% - ${details}`, downloaded);
+          sendProgress(overallPercent, currentStatusKey, { downloaded, total, speed });
         } else if (downloaded) {
-          const details = formatProgressDetails(downloaded, 0, speed);
-          sendProgress(-1, `${currentStatus} ${details}`, downloaded);
+          sendProgress(-1, currentStatusKey, { downloaded, total: 0, speed });
         }
       },
-      (status) => {
-        currentStatus = status;
-        sendProgress(-2, status);
+      (statusKey) => {
+        currentStatusKey = statusKey;
+        sendProgress(-2, statusKey);
       }
     );
 
@@ -931,7 +954,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   event.reply('download-progress', `🛠 yt-dlp Path: ${ytdlpPath}`);
 
   const outputPath = path.join(payload.location, payload.outputTemplate || '%(title)s.%(ext)s');
-  
+
   const args: string[] = [
     payload.url,
     '-o',
@@ -945,38 +968,62 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     '--encoding', 'utf-8',
   ];
 
-  if (ffmpegPath && ffmpegPath !== 'ffmpeg') {
-    // Pass the full path to the binary, not just the directory
-    // This helps yt-dlp find the companion ffprobe binary more reliably
-    args.push('--ffmpeg-location', ffmpegPath);
+  if (ffmpegPath) {
+    // yt-dlp expects a directory for ffmpeg-location when resolving ffprobe.
+    // If we only have a binary path, pass its directory instead.
+    let ffmpegLocationArg: string | null = null;
+    try {
+      const stats = fs.statSync(ffmpegPath);
+      ffmpegLocationArg = stats.isDirectory() ? ffmpegPath : path.dirname(ffmpegPath);
+    } catch {
+      // If the path isn't directly accessible (e.g., system ffmpeg), use it as-is
+      ffmpegLocationArg = ffmpegPath;
+    }
+
+    if (ffmpegLocationArg !== 'ffmpeg') {
+      args.push('--ffmpeg-location', ffmpegLocationArg);
+    }
   }
 
   // Advanced options (only for video mode or applicable audio options)
-  if (payload.advancedOptions.embedThumbnail) args.push('--embed-thumbnail');
-  if (payload.advancedOptions.addMetadata) args.push('--add-metadata');
+  // Thumbnail embedding is only supported for: mp3, mkv/mka, ogg/opus/flac, m4a/mp4/m4v/mov
+  // WAV does not support embedded thumbnails
+  const thumbnailSupportedFormats = ['mp3', 'mkv', 'mka', 'ogg', 'opus', 'flac', 'm4a', 'mp4', 'm4v', 'mov', 'webm'];
+  const currentFormat = payload.options.type === 'audio' ? payload.options.audioFormat : payload.options.videoContainer;
+  const canEmbedThumbnail = thumbnailSupportedFormats.includes(currentFormat.toLowerCase());
   
+  if (payload.advancedOptions.embedThumbnail && canEmbedThumbnail) args.push('--embed-thumbnail');
+  if (payload.advancedOptions.addMetadata) args.push('--add-metadata');
+
   // Video-only options
   if (payload.options.type === 'video') {
     if (payload.advancedOptions.embedSubs) args.push('--embed-subs');
     if (payload.advancedOptions.writeAutoSub) args.push('--write-auto-sub');
     if (payload.advancedOptions.splitChapters) args.push('--split-chapters');
   }
-  
+
   if (payload.advancedOptions.cookiesBrowser !== 'none') {
     args.push('--cookies-from-browser', payload.advancedOptions.cookiesBrowser);
   }
   if (payload.advancedOptions.playlist === 'single') args.push('--no-playlist');
   if (payload.advancedOptions.playlist === 'playlist') args.push('--yes-playlist');
 
+  // Time Range
+  if (payload.advancedOptions.timeRange?.enabled && payload.advancedOptions.timeRange.start && payload.advancedOptions.timeRange.end) {
+    args.push('--download-sections', `*${payload.advancedOptions.timeRange.start}-${payload.advancedOptions.timeRange.end}`);
+    // Force re-encoding to ensure accurate cuts, especially for non-keyframe cuts
+    args.push('--force-keyframes-at-cuts');
+  }
+
   if (payload.options.type === 'audio') {
     event.reply('download-progress', `🎵 Audio format: ${payload.options.audioFormat.toUpperCase()}`);
-    
+
     args.push(
       '-x',
       '--audio-format',
       payload.options.audioFormat
     );
-    
+
     // WAV uses bit depth instead of bitrate
     if (payload.options.audioFormat === 'wav') {
       event.reply('download-progress', `📊 Bit depth: ${payload.options.audioBitDepth || '16'}bit`);
@@ -990,7 +1037,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   } else {
     event.reply('download-progress', `🎬 Video format: ${payload.options.videoContainer.toUpperCase()}`);
     event.reply('download-progress', `📐 Resolution: ${payload.options.videoResolution}`);
-    
+
     if (payload.options.videoResolution !== 'best') {
       const height = payload.options.videoResolution.replace('p', '');
       args.push('-f', `bestvideo[height<=${height}]+bestaudio/best`);
@@ -998,14 +1045,14 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
       args.push('-f', 'bestvideo+bestaudio/best');
     }
     args.push('--merge-output-format', payload.options.videoContainer);
-    
+
     // Video conversion options
     if (payload.videoConversion?.enabled) {
       event.reply('download-progress', `🔄 Conversion: video=${payload.videoConversion.videoCodec}, audio=${payload.videoConversion.audioCodec}`);
-      
+
       const postArgs: string[] = [];
       const hwEncoder = payload.videoConversion.hwEncoder || 'auto';
-      
+
       if (payload.videoConversion.videoCodec !== 'copy') {
         // Hardware encoder mapping
         const getHwEncoderCodec = (codec: string, hw: HwEncoder): string => {
@@ -1019,7 +1066,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
             };
             return softwareCodecMap[codec] || 'libx264';
           }
-          
+
           // Hardware encoder specific codecs
           const hwCodecMap: Record<string, Record<string, string>> = {
             'nvenc': {
@@ -1042,7 +1089,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
               'h265': 'hevc_amf'
             }
           };
-          
+
           if (hw === 'auto') {
             // Try to detect available encoder
             // Priority: videotoolbox (macOS) > nvenc > qsv > amf > software
@@ -1059,22 +1106,22 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
             };
             return softwareCodecMap[codec] || 'libx264';
           }
-          
+
           return hwCodecMap[hw]?.[codec] || 'libx264';
         };
-        
+
         const selectedCodec = getHwEncoderCodec(payload.videoConversion.videoCodec, hwEncoder);
         postArgs.push(`-c:v ${selectedCodec}`);
-        
+
         if (hwEncoder !== 'none' && hwEncoder !== 'auto') {
           event.reply('download-progress', `🎮 Using hardware encoder: ${hwEncoder.toUpperCase()}`);
         }
-        
+
         if (payload.videoConversion.videoBitrate) {
           postArgs.push(`-b:v ${payload.videoConversion.videoBitrate}`);
         }
       }
-      
+
       if (payload.videoConversion.audioCodec !== 'copy') {
         const audioCodecMap: Record<string, string> = {
           'aac': 'aac',
@@ -1086,7 +1133,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
           postArgs.push(`-b:a ${payload.videoConversion.audioBitrate}`);
         }
       }
-      
+
       if (postArgs.length > 0) {
         args.push('--postprocessor-args', `ffmpeg:${postArgs.join(' ')}`);
       }
@@ -1103,7 +1150,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   let downloadedFilepath = '';
 
   isDownloadCancelled = false;
-  
+
   // Provide Node.js path to yt-dlp for JavaScript runtime support
   // On Windows, set PYTHONIOENCODING to utf-8 to avoid encoding issues
   const spawnEnv: NodeJS.ProcessEnv = {
@@ -1112,8 +1159,8 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     PYTHONIOENCODING: 'utf-8',
     PYTHONUTF8: '1'
   };
-  
-  activeDownloadProcess = spawn(ytdlpPath, args, { 
+
+  activeDownloadProcess = spawn(ytdlpPath, args, {
     windowsHide: true,
     env: spawnEnv
   });
@@ -1123,18 +1170,18 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     activeDownloadProcess.stdout.on('data', (data: string) => {
       const output = data.trim();
       const lines = output.split('\n');
-      
+
       lines.forEach(line => {
         // Extract title and filepath from --print output
         if (!downloadedTitle && line && !line.includes('[') && !line.includes('%')) {
           downloadedTitle = line;
         }
-        if (line && (line.endsWith('.mp4') || line.endsWith('.mkv') || line.endsWith('.webm') || 
-            line.endsWith('.mp3') || line.endsWith('.m4a') || line.endsWith('.flac') || 
-            line.endsWith('.wav') || line.endsWith('.aac'))) {
+        if (line && (line.endsWith('.mp4') || line.endsWith('.mkv') || line.endsWith('.webm') ||
+          line.endsWith('.mp3') || line.endsWith('.m4a') || line.endsWith('.flac') ||
+          line.endsWith('.wav') || line.endsWith('.aac'))) {
           downloadedFilepath = line;
         }
-        
+
         event.reply('download-progress', line);
       });
     });
@@ -1157,8 +1204,8 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
 
     if (isDownloadCancelled) {
       event.reply('download-progress', '🚫 Download cancelled.');
-      event.reply('download-complete', { 
-        success: false, 
+      event.reply('download-complete', {
+        success: false,
         message: 'Download cancelled.',
         title: downloadedTitle,
         filename: downloadedFilepath
@@ -1175,11 +1222,11 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
         // Ignore file stat errors
       }
     }
-    
+
     if (code === 0) {
       event.reply('download-progress', '✅ Download complete!');
-      event.reply('download-complete', { 
-        success: true, 
+      event.reply('download-complete', {
+        success: true,
         message: 'Download complete.',
         title: downloadedTitle,
         filename: downloadedFilepath,
@@ -1187,8 +1234,8 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
       });
     } else {
       event.reply('download-progress', `❌ Error occurred (code: ${code})`);
-      event.reply('download-complete', { 
-        success: false, 
+      event.reply('download-complete', {
+        success: false,
         message: `Error occurred (code: ${code})`,
         title: downloadedTitle,
         filename: downloadedFilepath,
@@ -1208,11 +1255,11 @@ ipcMain.handle('check-app-update', async () => {
 
     const latestVersion = release.tag_name.replace(/^v/, '');
     const currentVersion = app.getVersion();
-    
+
     // Simple string comparison for now, or use semver if needed
     // Assuming versions are like "0.0.1"
     const isUpdateAvailable = latestVersion !== currentVersion;
-    
+
     return {
       available: isUpdateAvailable,
       currentVersion,
@@ -1221,10 +1268,10 @@ ipcMain.handle('check-app-update', async () => {
     };
   } catch (e) {
     console.error('Failed to check for app updates', e);
-    return { 
-      available: false, 
+    return {
+      available: false,
       currentVersion: app.getVersion(),
-      error: 'Failed to check for updates' 
+      error: 'Failed to check for updates'
     };
   }
 });
@@ -1236,7 +1283,7 @@ ipcMain.handle('open-external', async (_, url) => {
 // Fetch video information for preview
 ipcMain.handle('fetch-video-info', async (_, url: string) => {
   const ytdlpPath = resolveYtDlpPath();
-  
+
   if (!ytdlpPath) {
     return { error: 'yt-dlp not found' };
   }
@@ -1245,7 +1292,8 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
     const args = [
       url,
       '-J', // Output JSON
-      '--flat-playlist', // Don't download playlist videos, just get info
+      '--playlist-end', '50', // Limit to 50 items for preview performance
+      '--ignore-errors', // Continue even if some videos are unavailable
       '--no-warnings',
       '--extractor-args', 'youtube:player_client=default',
       '--encoding', 'utf-8',
@@ -1261,19 +1309,19 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
     const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
       let stdout = '';
       let stderr = '';
-      
+
       const proc = spawn(ytdlpPath, args, { windowsHide: true, env: spawnEnv });
-      
+
       proc.stdout?.setEncoding('utf8');
       proc.stdout?.on('data', (data: string) => {
         stdout += data;
       });
-      
+
       proc.stderr?.setEncoding('utf8');
       proc.stderr?.on('data', (data: string) => {
         stderr += data;
       });
-      
+
       proc.on('close', (code) => {
         if (code === 0) {
           resolve({ stdout, stderr });
@@ -1281,9 +1329,9 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
           reject(new Error(stderr || `Process exited with code ${code}`));
         }
       });
-      
+
       proc.on('error', reject);
-      
+
       // Timeout after 30 seconds
       setTimeout(() => {
         proc.kill();
@@ -1292,20 +1340,54 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
     });
 
     const data = JSON.parse(result.stdout);
-    
+
     // Check if it's a playlist
     if (data._type === 'playlist' && data.entries) {
       // For playlists, we need to get more details for each entry
       // But for performance, we'll limit to first 50 entries
-      const entries = data.entries.slice(0, 50).map((entry: any) => ({
-        id: entry.id || entry.url,
-        title: entry.title || 'Unknown',
-        channel: entry.channel || entry.uploader || data.channel || data.uploader || 'Unknown',
-        thumbnail: entry.thumbnail || entry.thumbnails?.[0]?.url || '',
-        duration: entry.duration || 0,
-        viewCount: entry.view_count,
-        filesize: entry.filesize || entry.filesize_approx,
-      }));
+      const entries = data.entries.slice(0, 50).map((entry: any) => {
+        // Calculate best resolution for entry
+        let bestResolution: string | undefined;
+        // Check if formats are available (might not be with flat-playlist)
+        if (entry.formats) {
+          const heights = entry.formats
+            .filter((f: any) => f.height && f.vcodec && f.vcodec !== 'none')
+            .map((f: any) => f.height);
+
+          if (heights.length > 0) {
+            const maxHeight = Math.max(...heights);
+            if (maxHeight >= 2160) bestResolution = '4K';
+            else if (maxHeight >= 1440) bestResolution = '1440p';
+            else if (maxHeight >= 1080) bestResolution = '1080p';
+            else if (maxHeight >= 720) bestResolution = '720p';
+            else if (maxHeight >= 480) bestResolution = '480p';
+            else if (maxHeight >= 360) bestResolution = '360p';
+            else bestResolution = `${maxHeight}p`;
+          }
+        }
+        // Fallback to entry.height if available (common in flat-playlist)
+        else if (entry.height) {
+          const maxHeight = entry.height;
+          if (maxHeight >= 2160) bestResolution = '4K';
+          else if (maxHeight >= 1440) bestResolution = '1440p';
+          else if (maxHeight >= 1080) bestResolution = '1080p';
+          else if (maxHeight >= 720) bestResolution = '720p';
+          else if (maxHeight >= 480) bestResolution = '480p';
+          else if (maxHeight >= 360) bestResolution = '360p';
+          else bestResolution = `${maxHeight}p`;
+        }
+
+        return {
+          id: entry.id || entry.url,
+          title: entry.title || 'Unknown',
+          channel: entry.channel || entry.uploader || data.channel || data.uploader || 'Unknown',
+          thumbnail: entry.thumbnail || entry.thumbnails?.[0]?.url || '',
+          duration: entry.duration || 0,
+          viewCount: entry.view_count,
+          filesize: entry.filesize || entry.filesize_approx,
+          bestResolution,
+        };
+      });
 
       return {
         isPlaylist: true,
@@ -1339,16 +1421,16 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
     let estimatedSize = 0;
     const videoFormats = formats.filter((f: any) => f.vcodec && f.vcodec !== 'none');
     const audioFormats = formats.filter((f: any) => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
-    
+
     if (videoFormats.length > 0) {
-      const bestVideo = videoFormats.sort((a: any, b: any) => 
+      const bestVideo = videoFormats.sort((a: any, b: any) =>
         (b.filesize || b.filesize_approx || 0) - (a.filesize || a.filesize_approx || 0)
       )[0];
       estimatedSize += bestVideo.filesize || bestVideo.filesize_approx || 0;
     }
-    
+
     if (audioFormats.length > 0) {
-      const bestAudio = audioFormats.sort((a: any, b: any) => 
+      const bestAudio = audioFormats.sort((a: any, b: any) =>
         (b.filesize || b.filesize_approx || 0) - (a.filesize || a.filesize_approx || 0)
       )[0];
       estimatedSize += bestAudio.filesize || bestAudio.filesize_approx || 0;
@@ -1361,7 +1443,7 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
       const heights = (data.formats || [])
         .filter((f: any) => f.height && f.vcodec && f.vcodec !== 'none')
         .map((f: any) => f.height);
-      
+
       if (heights.length > 0) {
         const maxHeight = Math.max(...heights);
         // Convert to standard resolution names
@@ -1401,31 +1483,31 @@ ipcMain.handle('fetch-video-info', async (_, url: string) => {
 // Detect available hardware encoders
 ipcMain.handle('detect-hw-encoders', async () => {
   const ffmpegPath = resolveFfmpegPath();
-  
+
   if (!ffmpegPath) {
     return { available: [] };
   }
 
   const encoders: string[] = [];
-  
+
   try {
     const { stdout } = await execAsync(`"${ffmpegPath}" -hide_banner -encoders`);
-    
+
     // Check for NVENC (NVIDIA)
     if (stdout.includes('h264_nvenc') || stdout.includes('hevc_nvenc')) {
       encoders.push('nvenc');
     }
-    
+
     // Check for QuickSync (Intel)
     if (stdout.includes('h264_qsv') || stdout.includes('hevc_qsv')) {
       encoders.push('qsv');
     }
-    
+
     // Check for VideoToolbox (Apple)
     if (stdout.includes('h264_videotoolbox') || stdout.includes('hevc_videotoolbox')) {
       encoders.push('videotoolbox');
     }
-    
+
     // Check for AMF (AMD)
     if (stdout.includes('h264_amf') || stdout.includes('hevc_amf')) {
       encoders.push('amf');
@@ -1433,6 +1515,6 @@ ipcMain.handle('detect-hw-encoders', async () => {
   } catch (e) {
     console.error('Failed to detect hardware encoders:', e);
   }
-  
+
   return { available: encoders };
 });

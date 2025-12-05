@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Save, FolderOpen, Plus, Trash2, Film, Music, Terminal, Palette, Layout, Monitor, HardDrive, Settings as SettingsIcon, Download, XCircle, Info, Loader2, Heart, Globe } from 'lucide-react';
+import { X, Save, FolderOpen, Plus, Trash2, Film, Music, Terminal, Palette, Layout, Monitor, HardDrive, Settings as SettingsIcon, Download, XCircle, Info, Loader2, Heart, Globe, Bell } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Preset } from '../types/Preset';
 import { BinaryUpdateProgress } from '../types/electron';
+import { TranslationKey } from '../i18n/translations';
 
 interface SettingsModalProps {
 	isOpen: boolean;
@@ -26,6 +27,9 @@ interface SettingsModalProps {
 	themes: any;
 	binaryVersions: { ytDlp: string; ffmpeg: string } | null;
 	latestBinaryVersions: { ytDlp: string; ffmpeg: string } | null;
+	onClearBinaryStatus: () => void;
+	notificationsEnabled: boolean;
+	setNotificationsEnabled: (enabled: boolean) => void;
 }
 
 type Tab = 'general' | 'appearance' | 'binaries' | 'presets' | 'info';
@@ -49,7 +53,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	setTheme,
 	themes,
 	binaryVersions,
-	latestBinaryVersions
+	latestBinaryVersions,
+	onClearBinaryStatus,
+	notificationsEnabled,
+	setNotificationsEnabled
 }) => {
 	const { t, language, setLanguage } = useI18n();
 	const [activeTab, setActiveTab] = useState<Tab>('general');
@@ -69,13 +76,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 			if (result.error) {
 				setAppUpdateStatus({ checking: false, available: null, message: t('updateCheckFailed') });
 			} else {
-				setAppUpdateStatus({ 
-					checking: false, 
-					available: result.available, 
-					version: result.latestVersion, 
+				setAppUpdateStatus({
+					checking: false,
+					available: result.available,
+					version: result.latestVersion,
 					url: result.url,
-					message: result.available 
-						? t('newVersionAvailable').replace('{version}', result.latestVersion || '') 
+					message: result.available
+						? t('newVersionAvailable').replace('{version}', result.latestVersion || '')
 						: t('upToDate')
 				});
 			}
@@ -87,12 +94,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	// Reset update status when modal opens/closes or tab changes if desired
 	// For now, keep it simple.
 
+	const formatProgress = (progress: BinaryUpdateProgress) => {
+		let statusText = '';
+		if (progress.statusKey) {
+			statusText = t(progress.statusKey as TranslationKey);
+		} else if (progress.status) {
+			statusText = progress.status;
+		}
+
+		if (progress.progressData) {
+			const { downloaded, total, speed } = progress.progressData;
+			const mbDownloaded = (downloaded / 1024 / 1024).toFixed(1);
+			const mbSpeed = (speed / 1024 / 1024).toFixed(1);
+
+			if (total > 0) {
+				const mbTotal = (total / 1024 / 1024).toFixed(1);
+				return `${statusText} ${progress.percent}% - ${mbDownloaded}MB / ${mbTotal}MB (${mbSpeed} MB/s)`;
+			} else {
+				return `${statusText} ${mbDownloaded}MB (${mbSpeed} MB/s)`;
+			}
+		}
+
+		return statusText || t('downloading');
+	};
+
 	const activeTheme = themes[currentTheme];
 
 	// Handle ESC key to close modal
 	useEffect(() => {
 		if (!isOpen) return;
-		
+
 		const handleKeyDown = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				e.preventDefault();
@@ -101,7 +132,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 				onClose();
 			}
 		};
-		
+
 		// Use capture phase with higher priority
 		document.addEventListener('keydown', handleKeyDown, { capture: true });
 		return () => document.removeEventListener('keydown', handleKeyDown, { capture: true });
@@ -169,20 +200,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 					>
 						{/* Sidebar */}
 						<div className="w-full md:w-64 bg-black/20 border-b md:border-b-0 md:border-r border-white/5 p-4 flex flex-col gap-2">
-									<div className="mb-6 px-2 pt-2 hidden md:block">
-										<h2 className="text-xl font-bold text-white">{t('settingsTitle')}</h2>
-										<div className="flex items-center gap-2 mt-2">
-											<Globe size={12} className="text-gray-500" />
-											<select
-												value={language}
-												onChange={(e) => setLanguage(e.target.value as 'ja' | 'en')}
-												className="bg-transparent text-xs text-gray-400 cursor-pointer hover:text-white transition-colors focus:outline-none"
-											>
-												<option value="ja" className="bg-[#111]">日本語</option>
-												<option value="en" className="bg-[#111]">English</option>
-											</select>
-										</div>
-									</div>							<div className="flex md:flex-col gap-2 overflow-x-auto md:overflow-visible no-scrollbar">
+							<div className="mb-6 px-2 pt-2 hidden md:block">
+								<h2 className="text-xl font-bold text-white">{t('settingsTitle')}</h2>
+								<div className="flex items-center gap-2 mt-2">
+									<Globe size={12} className="text-gray-500" />
+									<select
+										value={language}
+										onChange={(e) => setLanguage(e.target.value as 'ja' | 'en')}
+										className="bg-transparent text-xs text-gray-400 cursor-pointer hover:text-white transition-colors focus:outline-none"
+									>
+										<option value="ja" className="bg-[#111]">日本語</option>
+										<option value="en" className="bg-[#111]">English</option>
+									</select>
+								</div>
+							</div>							<div className="flex md:flex-col gap-2 overflow-x-auto md:overflow-visible no-scrollbar">
 								{tabs.map((tab) => {
 									const Icon = tab.icon;
 									const themeColor = activeTheme?.toggle || 'bg-purple-500';
@@ -191,8 +222,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 											key={tab.id}
 											onClick={() => setActiveTab(tab.id)}
 											className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all whitespace-nowrap ${activeTab === tab.id
-													? 'bg-white/10 text-white shadow-lg shadow-white/5'
-													: 'text-gray-400 hover:text-white hover:bg-white/5'
+												? 'bg-white/10 text-white shadow-lg shadow-white/5'
+												: 'text-gray-400 hover:text-white hover:bg-white/5'
 												}`}
 										>
 											<Icon size={18} />
@@ -209,7 +240,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 							</div>
 
 							<div className="mt-auto hidden md:block px-4 py-2">
-								<p className="text-xs font-mono text-gray-600">V1.0</p>
+								<p className="text-xs font-mono text-gray-600">V1.1.0</p>
 							</div>
 						</div>
 
@@ -362,11 +393,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 																{binaryVersions?.ffmpeg && binaryVersions.ffmpeg !== 'Not detected' && (
 																	// Show "latest" badge if: ffmpeg is N-* version (yt-dlp/FFmpeg-Builds latest), versions match, or API returned "latest" marker
 																	(binaryVersions.ffmpeg.startsWith('N-') ||
-																	 (latestBinaryVersions?.ffmpeg && (
-																		binaryVersions.ffmpeg === latestBinaryVersions.ffmpeg ||
-																		binaryVersions.ffmpeg.includes(latestBinaryVersions.ffmpeg) ||
-																		latestBinaryVersions.ffmpeg === 'latest'
-																	 ))) ? (
+																		(latestBinaryVersions?.ffmpeg && (
+																			binaryVersions.ffmpeg === latestBinaryVersions.ffmpeg ||
+																			binaryVersions.ffmpeg.includes(latestBinaryVersions.ffmpeg) ||
+																			latestBinaryVersions.ffmpeg === 'latest'
+																		))) ? (
 																		<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">{t('latest')}</span>
 																	) : latestBinaryVersions?.ffmpeg && latestBinaryVersions.ffmpeg !== 'Unknown' && (
 																		<span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/20">
@@ -384,7 +415,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 														<>
 															<button
 																onClick={onUpdateBinaries}
-																disabled={!!binaryStatus || !!binaryUpdateProgress}
+																disabled={!!binaryUpdateProgress}
 																className={`px-4 py-3 rounded-xl ${activeTheme?.toggleBg || 'bg-purple-500/10'} hover:opacity-80 ${activeTheme?.icon || 'text-purple-400'} text-sm font-medium transition-colors border ${activeTheme?.border || 'border-purple-500/20'} disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
 															>
 																<Terminal size={16} />
@@ -392,7 +423,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 															</button>
 															<button
 																onClick={onUpdateFfmpeg}
-																disabled={!!binaryStatus || !!binaryUpdateProgress}
+																disabled={!!binaryUpdateProgress}
 																className={`px-4 py-3 rounded-xl ${activeTheme?.toggleBg || 'bg-purple-500/10'} hover:opacity-80 ${activeTheme?.icon || 'text-purple-400'} text-sm font-medium transition-colors border ${activeTheme?.border || 'border-purple-500/20'} disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
 															>
 																<Film size={16} />
@@ -402,7 +433,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													) : (
 														<button
 															onClick={onDownloadBinaries}
-															disabled={!!binaryStatus || !!binaryUpdateProgress}
+															disabled={!!binaryUpdateProgress}
 															className="col-span-2 px-4 py-3 rounded-xl bg-green-500/10 hover:bg-green-500/20 text-green-400 text-sm font-medium transition-colors border border-green-500/20 animate-pulse disabled:animate-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
 														>
 															<Download size={16} />
@@ -414,7 +445,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 												{binaryUpdateProgress && (
 													<div className="space-y-3">
 														<div className="flex justify-between items-center text-xs text-gray-400">
-															<span>{binaryUpdateProgress.status}</span>
+
+															<span>{formatProgress(binaryUpdateProgress)}</span>
 															{binaryUpdateProgress.percent >= 0 ? (
 																<span>{binaryUpdateProgress.percent}%</span>
 															) : (
@@ -441,8 +473,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 																	className={`absolute h-full rounded-full ${activeTheme?.button || 'bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600'}`}
 																	initial={{ left: '-30%' }}
 																	animate={{ left: '100%' }}
-																	transition={{ 
-																		duration: 1, 
+																	transition={{
+																		duration: 1,
 																		repeat: Infinity,
 																		ease: 'linear'
 																	}}
@@ -461,13 +493,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 												)}
 
 												{binaryStatus && (
-													<div className={`text-xs text-center py-2 rounded-lg border ${binaryStatus.type === 'success'
+													<div className={`text-xs text-center py-2 rounded-lg border flex items-center justify-between px-3 ${binaryStatus.type === 'success'
 														? 'text-green-300 bg-green-500/10 border-green-500/20'
 														: binaryStatus.type === 'error'
 															? 'text-red-300 bg-red-500/10 border-red-500/20'
 															: 'text-blue-300 bg-blue-500/10 border-blue-500/20 animate-pulse'
 														}`}>
-														{binaryStatus.message}
+														<span className="flex-1">{binaryStatus.message}</span>
+														<button
+															onClick={onClearBinaryStatus}
+															className="ml-2 p-1 hover:bg-white/10 rounded-full transition-colors"
+														>
+															<X size={14} />
+														</button>
 													</div>
 												)}
 											</div>
@@ -556,10 +594,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													</div>
 													<div>
 														<h4 className="text-xl font-bold text-white">yt-dlp-gui</h4>
-														<p className="text-sm text-gray-400">Version 1.0</p>
+														<p className="text-sm text-gray-400">Version 1.1.0</p>
 													</div>
 												</div>
-												
+
 												<div className="space-y-2 text-sm text-gray-300">
 													<div className="flex justify-between py-2 border-b border-white/5">
 														<span className="text-gray-500">{t('author')}</span>
@@ -586,18 +624,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													</button>
 
 													{appUpdateStatus && !appUpdateStatus.checking && (
-														<div className={`text-xs text-center py-3 rounded-lg border ${
-															appUpdateStatus.available 
-															? 'text-green-300 bg-green-500/10 border-green-500/20' 
+														<div className={`text-xs text-center py-3 rounded-lg border ${appUpdateStatus.available
+															? 'text-green-300 bg-green-500/10 border-green-500/20'
 															: 'text-gray-400 bg-white/5 border-white/5'
-														}`}>
+															}`}>
 															<div className="font-medium mb-1">
-																{appUpdateStatus.available 
+																{appUpdateStatus.available
 																	? t('newVersionAvailable', { version: appUpdateStatus.version || '' })
 																	: appUpdateStatus.message || t('upToDate')}
 															</div>
 															{appUpdateStatus.available && appUpdateStatus.url && (
-																<button 
+																<button
 																	onClick={() => window.electron.openExternal(appUpdateStatus.url!)}
 																	className="text-blue-400 hover:text-blue-300 hover:underline transition-colors"
 																>
