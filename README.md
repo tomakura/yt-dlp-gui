@@ -3,12 +3,12 @@
 <table>
   <tr>
     <td align="center">
-      <img src="./public/yt-dlp-gui_JP.png" alt="yt-dlp GUI Japanese Interface" width="400"/>
+      <img src="./public/yt-dlp-GUI_JP.png" alt="yt-dlp GUI Japanese Interface" width="400"/>
       <br>
       <em>日本語インターフェース</em>
     </td>
     <td align="center">
-      <img src="./public/yt-dlp-gui_EN.png" alt="yt-dlp GUI English Interface" width="400"/>
+      <img src="./public/yt-dlp-GUI_EN.png" alt="yt-dlp GUI English Interface" width="400"/>
       <br>
       <em>English Interface</em>
     </td>
