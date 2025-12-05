@@ -1,5 +1,20 @@
 # yt-dlp GUI
 
+<table>
+  <tr>
+    <td align="center">
+      <img src="./public/yt-dlp-gui_JP.png" alt="yt-dlp GUI Japanese Interface" width="400"/>
+      <br>
+      <em>日本語インターフェース</em>
+    </td>
+    <td align="center">
+      <img src="./public/yt-dlp-gui_EN.png" alt="yt-dlp GUI English Interface" width="400"/>
+      <br>
+      <em>English Interface</em>
+    </td>
+  </tr>
+</table>
+
 [日本語](#日本語) | [English](#english)
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Me-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/tomakura)
