@@ -10,6 +10,7 @@ export interface FormatOptions {
   audioBitrate: string;
   audioSampleRate: string;
   audioBitDepth: string; // for WAV: 16, 24, 32
+  conversion?: VideoConversionOptions;
 }
 
 export interface VideoConversionOptions {

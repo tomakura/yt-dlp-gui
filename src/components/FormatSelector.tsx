@@ -20,14 +20,14 @@ interface FormatSelectorProps {
   estimatedSize?: number;
 }
 
-export const FormatSelector: React.FC<FormatSelectorProps> = ({ 
-  options, 
+export const FormatSelector: React.FC<FormatSelectorProps> = ({
+  options,
   setOptions,
   theme,
   estimatedSize
 }) => {
   const { t } = useI18n();
-  
+
   const formatFileSize = (bytes: number | undefined): string => {
     if (!bytes || bytes <= 0) return '';
     if (bytes < 1024) return bytes + ' B';
@@ -35,7 +35,7 @@ export const FormatSelector: React.FC<FormatSelectorProps> = ({
     if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   };
-  
+
   const themeStyles = theme || {
     tabActive: 'bg-purple-500/20',
     tabActiveText: 'text-purple-200',
@@ -45,7 +45,7 @@ export const FormatSelector: React.FC<FormatSelectorProps> = ({
     toggleTrack: 'bg-purple-500/20',
     icon: 'text-purple-400'
   };
-  
+
   const setType = (type: FormatType) => setOptions({ ...options, type });
   const update = <K extends keyof FormatOptions>(key: K, value: FormatOptions[K]) =>
     setOptions({ ...options, [key]: value });
@@ -113,6 +113,58 @@ export const FormatSelector: React.FC<FormatSelectorProps> = ({
             </div>
           </div>
 
+          {/* Codec Selection for Video */}
+          {options.conversion && (
+            <div className="mt-3 pt-3 border-t border-white/5 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-gray-400">{t('videoCodec') || 'Video Codec'}</label>
+                  <select
+                    value={options.conversion.videoCodec}
+                    onChange={(e) => update('conversion', { ...options.conversion!, videoCodec: e.target.value as any })}
+                    className="w-full glass-input rounded-xl px-3 py-2 text-xs text-gray-200 bg-[#0b0b0b]"
+                  >
+                    <option value="h264">H.264 (Default)</option>
+                    <option value="h265">H.265 (HEVC)</option>
+                    <option value="av1">AV1</option>
+                    <option value="vp9">VP9</option>
+                    <option value="copy">Copy (No Recode)</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-gray-400">{t('audioCodec') || 'Audio Codec'}</label>
+                  <select
+                    value={options.conversion.audioCodec}
+                    onChange={(e) => update('conversion', { ...options.conversion!, audioCodec: e.target.value as any })}
+                    className="w-full glass-input rounded-xl px-3 py-2 text-xs text-gray-200 bg-[#0b0b0b]"
+                  >
+                    <option value="aac">AAC (Default)</option>
+                    <option value="mp3">MP3</option>
+                    <option value="opus">Opus</option>
+                    <option value="copy">Copy (No Recode)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-gray-400">{t('audioBitrate') || 'Audio Bitrate'}</label>
+                  <select
+                    value={options.conversion.audioBitrate}
+                    onChange={(e) => update('conversion', { ...options.conversion!, audioBitrate: e.target.value })}
+                    className="w-full glass-input rounded-xl px-3 py-2 text-xs text-gray-200 bg-[#0b0b0b]"
+                    disabled={options.conversion.audioCodec === 'copy'}
+                  >
+                    <option value="320k">320 kbps</option>
+                    <option value="256k">256 kbps</option>
+                    <option value="192k">192 kbps</option>
+                    <option value="128k">128 kbps</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
           {estimatedSize && estimatedSize > 0 && (
             <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-end gap-2">
               <span className="text-[10px] text-gray-500">{t('estimatedSize')}:</span>
@@ -179,7 +231,7 @@ export const FormatSelector: React.FC<FormatSelectorProps> = ({
               <option value="44100">44.1 kHz</option>
             </select>
           </div>
-          
+
           {estimatedSize && estimatedSize > 0 && (
             <div className="pt-2 border-t border-white/5 flex items-center justify-end gap-2">
               <span className="text-[10px] text-gray-500">{t('estimatedSize')}:</span>

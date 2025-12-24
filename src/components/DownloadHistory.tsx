@@ -16,7 +16,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   onRemoveItem
 }) => {
   const { t, language } = useI18n();
-  
+
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return t('unknown');
     const k = 1024;
@@ -30,9 +30,9 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    
+
     const locale = language === 'ja' ? 'ja-JP' : 'en-US';
-    
+
     if (days === 0) {
       return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
     } else if (days === 1) {
@@ -109,7 +109,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       {item.title || t('titleUnknown')}
                     </span>
                   </div>
-                  
+
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[10px] text-gray-500">
                     <div className="flex items-center gap-1">
                       <Clock size={10} />
@@ -125,11 +125,10 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                         {getFolderName(item.location)}
                       </span>
                     </div>
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] ${
-                      item.format === 'video' 
-                        ? 'bg-purple-500/20 text-purple-300' 
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] ${item.format === 'video'
+                        ? 'bg-purple-500/20 text-purple-300'
                         : 'bg-blue-500/20 text-blue-300'
-                    }`}>
+                      }`}>
                       {item.format === 'video' ? t('video') : t('audio')}
                     </span>
                   </div>
@@ -137,13 +136,25 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   {item.filename && item.success && (
-                    <button
-                      onClick={() => openFolder(item.filename)}
-                      className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-blue-400 transition-colors"
-                      title={t('openFolder')}
-                    >
-                      <ExternalLink size={12} />
-                    </button>
+                    <>
+                      <button
+                        onClick={() => openFolder(item.filename)}
+                        className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-blue-400 transition-colors"
+                        title={t('openFile') || 'Open File'}
+                      >
+                        <ExternalLink size={12} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          const dir = item.filename?.substring(0, item.filename.lastIndexOf(item.filename.includes('\\') ? '\\' : '/')) || item.location;
+                          window.electron.openFolder(dir);
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-yellow-400 transition-colors"
+                        title={t('openFolder') || 'Open Folder'}
+                      >
+                        <Folder size={12} />
+                      </button>
+                    </>
                   )}
                   <button
                     onClick={() => onRemoveItem(item.id)}

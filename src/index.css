@@ -16,6 +16,12 @@ body {
   background: #050505;
 }
 
+/* Fix for Windows dropdown menu visibility */
+select option {
+  background-color: #1a1a1a;
+  color: #ffffff;
+}
+
 .glass {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -26,6 +32,11 @@ body {
 .glass-input {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Ensure select element itself has consistent background when collapsed, merging with glass effect */
+select.glass-input {
+  background-color: rgba(5, 5, 5, 0.5); 
 }
 
 .custom-scrollbar {

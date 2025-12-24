@@ -584,6 +584,14 @@ ipcMain.handle('get-default-download-path', () => {
   return app.getPath('downloads');
 });
 
+ipcMain.on('open-folder', (_event, folderPath: string) => {
+  if (folderPath && fs.existsSync(folderPath)) {
+    shell.openPath(folderPath);
+  } else {
+    console.error('Folder does not exist:', folderPath);
+  }
+});
+
 const fetchJson = (url: string): Promise<any> => {
   return new Promise((resolve, reject) => {
     const request = net.request({
@@ -991,7 +999,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   const thumbnailSupportedFormats = ['mp3', 'mkv', 'mka', 'ogg', 'opus', 'flac', 'm4a', 'mp4', 'm4v', 'mov', 'webm'];
   const currentFormat = payload.options.type === 'audio' ? payload.options.audioFormat : payload.options.videoContainer;
   const canEmbedThumbnail = thumbnailSupportedFormats.includes(currentFormat.toLowerCase());
-  
+
   if (payload.advancedOptions.embedThumbnail && canEmbedThumbnail) args.push('--embed-thumbnail');
   if (payload.advancedOptions.addMetadata) args.push('--add-metadata');
 

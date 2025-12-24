@@ -9,6 +9,7 @@ import { StatusToast, Status } from './components/StatusToast';
 import { SettingsModal } from './components/SettingsModal';
 import { DownloadHistory } from './components/DownloadHistory';
 import { VideoPreview, VideoInfo, PlaylistInfo } from './components/VideoPreview';
+import { QueueList } from './components/QueueList';
 import { FormatOptions, AdvancedOptionsState, DownloadHistoryItem } from './types/options';
 import { DownloadResult, BinaryUpdateProgress } from './types/electron';
 import { Preset } from './types/Preset';
@@ -122,16 +123,34 @@ function App() {
 
 	const [formatOptions, setFormatOptions] = useState<FormatOptions>(() => {
 		const saved = localStorage.getItem('lastFormatOptions');
-		const parsed = saved ? JSON.parse(saved) : {
+		const defaultConversion = {
+			enabled: true,
+			videoCodec: 'h264',
+			videoBitrate: '',
+			audioCodec: 'aac',
+			audioBitrate: '320k',
+			hwEncoder: 'auto'
+		};
+
+		if (saved) {
+			const parsed = JSON.parse(saved);
+			return {
+				...parsed,
+				type: 'video',
+				conversion: parsed.conversion || defaultConversion
+			};
+		}
+
+		return {
 			type: 'video',
 			videoContainer: 'mp4',
 			videoResolution: 'best',
 			audioFormat: 'mp3',
 			audioBitrate: '320k',
 			audioSampleRate: '48000',
-			audioBitDepth: '16'
+			audioBitDepth: '16',
+			conversion: defaultConversion
 		};
-		return { ...parsed, type: 'video' };
 	});
 
 	const [advancedOptions, setAdvancedOptions] = useState<AdvancedOptionsState>(() => {
@@ -160,12 +179,13 @@ function App() {
 		localStorage.setItem('notificationsEnabled', String(notificationsEnabled));
 	}, [notificationsEnabled]);
 
-        // Batch Download Queue
-        const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>(() => {
-                const saved = localStorage.getItem('downloadQueue');
-                return saved ? JSON.parse(saved) : [];
-        });
-        const [activePage, setActivePage] = useState<'download' | 'queueHistory'>('download');
+	// Batch Download Queue
+	const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>(() => {
+		const saved = localStorage.getItem('downloadQueue');
+		return saved ? JSON.parse(saved) : [];
+	});
+	const [activePage, setActivePage] = useState<'download' | 'history'>('download');
+	const [isQueueOpen, setIsQueueOpen] = useState(false);
 
 	// Binary Status State
 	const [binariesExist, setBinariesExist] = useState<boolean | null>(null);
@@ -179,22 +199,22 @@ function App() {
 	const [isClipboardMonitorEnabled, setIsClipboardMonitorEnabled] = useState(false);
 
 	// Favorites State
-        const [favorites, setFavorites] = useState<string[]>(() => {
-                const saved = localStorage.getItem('favoriteFolders');
-                return saved ? JSON.parse(saved) : [];
-        });
+	const [favorites, setFavorites] = useState<string[]>(() => {
+		const saved = localStorage.getItem('favoriteFolders');
+		return saved ? JSON.parse(saved) : [];
+	});
 
-        useEffect(() => {
-                localStorage.setItem('downloadQueue', JSON.stringify(downloadQueue));
-        }, [downloadQueue]);
+	useEffect(() => {
+		localStorage.setItem('downloadQueue', JSON.stringify(downloadQueue));
+	}, [downloadQueue]);
 
-        // Download History State
-        const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>(() => {
-                const saved = localStorage.getItem('downloadHistory');
-                return saved ? JSON.parse(saved) : [];
-        });
+	// Download History State
+	const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>(() => {
+		const saved = localStorage.getItem('downloadHistory');
+		return saved ? JSON.parse(saved) : [];
+	});
 
-        const [showConsole, setShowConsole] = useState(false);
+	const [showConsole, setShowConsole] = useState(false);
 
 	// Download Progress State
 	const [downloadProgress, setDownloadProgress] = useState(0);
@@ -312,6 +332,7 @@ function App() {
 
 	// Download State
 	const [isDownloading, setIsDownloading] = useState(false);
+	const [progressStage, setProgressStage] = useState<'downloading' | 'converting'>('downloading');
 	const [status, setStatus] = useState<Status>('idle');
 	const [logs, setLogs] = useState<string[]>([]);
 	const logsEndRef = useRef<HTMLDivElement>(null);
@@ -353,9 +374,15 @@ function App() {
 			setTotalSize(simpleMatch[2]);
 		}
 
+		// Detect conversion phase
+		if (log.includes('[ExtractAudio]') || log.includes('[Merger]') || log.includes('Destination:')) {
+			setProgressStage('converting');
+		}
+
 		// Also match ffmpeg conversion progress
 		const ffmpegMatch = log.match(/time=(\d+):(\d+):(\d+)/);
 		if (ffmpegMatch) {
+			setProgressStage('converting');
 			// Just indicate activity during conversion
 			setDownloadProgress(prev => Math.min(prev + 0.1, 99));
 		}
@@ -634,9 +661,9 @@ function App() {
 	};
 
 
-        // Refactor handleDownload to accept URL override
-        const startDownloadProcess = useCallback((targetUrl: string, subfolder?: string) => {
-                if (!targetUrl) return;
+	// Refactor handleDownload to accept URL override
+	const startDownloadProcess = useCallback((targetUrl: string, subfolder?: string) => {
+		if (!targetUrl) return;
 		if (!location) {
 			alert(t('selectDestination'));
 			return;
@@ -644,6 +671,7 @@ function App() {
 
 		setIsDownloading(true);
 		setStatus('downloading');
+		setProgressStage('downloading');
 		setDownloadProgress(0);
 		setCurrentDownloadUrl(targetUrl);
 		setLogs([t('startingDownload')]);
@@ -678,57 +706,58 @@ function App() {
 			args: customArgs,
 			options: formatOptions,
 			advancedOptions,
+			videoConversion: formatOptions.conversion,
 			outputTemplate: finalOutputTemplate,
 			notificationsEnabled
 		});
 	}, [location, formatOptions, advancedOptions, outputTemplate, notificationsEnabled, t, playlistInfo]);
 
 	// Update original handleDownload to use the new function
-        const handleDownload = useCallback(() => {
-                startDownloadProcess(url);
-        }, [startDownloadProcess, url]);
+	const handleDownload = useCallback(() => {
+		startDownloadProcess(url);
+	}, [startDownloadProcess, url]);
 
-        const handleAddToQueue = useCallback(() => {
-                if (!url) return;
-                if (!location) {
-                        alert(t('selectDestination'));
-                        return;
-                }
+	const handleAddToQueue = useCallback(() => {
+		if (!url) return;
+		if (!location) {
+			alert(t('selectDestination'));
+			return;
+		}
 
-                setDownloadQueue(prev => [...prev, { url }]);
-                setLogs(prev => [...prev, t('queuedForDownload', { url })]);
-        }, [location, t, url]);
+		setDownloadQueue(prev => [...prev, { url }]);
+		setLogs(prev => [...prev, t('queuedForDownload', { url })]);
+	}, [location, t, url]);
 
-        const handleRemoveQueueItem = useCallback((index: number) => {
-                setDownloadQueue(prev => prev.filter((_, i) => i !== index));
-        }, []);
+	const handleRemoveQueueItem = useCallback((index: number) => {
+		setDownloadQueue(prev => prev.filter((_, i) => i !== index));
+	}, []);
 
-        const handleMoveQueueItem = useCallback((index: number, direction: 'up' | 'down') => {
-                setDownloadQueue(prev => {
-                        const newQueue = [...prev];
-                        const targetIndex = direction === 'up' ? index - 1 : index + 1;
-                        if (targetIndex < 0 || targetIndex >= newQueue.length) return prev;
-                        [newQueue[index], newQueue[targetIndex]] = [newQueue[targetIndex], newQueue[index]];
-                        return newQueue;
-                });
-        }, []);
+	const handleMoveQueueItem = useCallback((index: number, direction: 'up' | 'down') => {
+		setDownloadQueue(prev => {
+			const newQueue = [...prev];
+			const targetIndex = direction === 'up' ? index - 1 : index + 1;
+			if (targetIndex < 0 || targetIndex >= newQueue.length) return prev;
+			[newQueue[index], newQueue[targetIndex]] = [newQueue[targetIndex], newQueue[index]];
+			return newQueue;
+		});
+	}, []);
 
-        const handleClearQueue = useCallback(() => {
-                setDownloadQueue([]);
-        }, []);
+	const handleClearQueue = useCallback(() => {
+		setDownloadQueue([]);
+	}, []);
 
-        // Queue processing effect - improved
-        useEffect(() => {
-                if (!isDownloading && downloadQueue.length > 0) {
-                        const nextItem = downloadQueue[0];
-                        setDownloadQueue(prev => prev.slice(1));
-                        // Update URL state for UI consistency
-                        setUrl(nextItem.url);
-                        setLogs(prev => [...prev, t('startingQueuedDownload', { url: nextItem.url })]);
-                        // Start download
-                        startDownloadProcess(nextItem.url, nextItem.subfolder);
-                }
-        }, [isDownloading, downloadQueue, startDownloadProcess, t]);
+	// Queue processing effect - improved
+	useEffect(() => {
+		if (!isDownloading && downloadQueue.length > 0) {
+			const nextItem = downloadQueue[0];
+			setDownloadQueue(prev => prev.slice(1));
+			// Update URL state for UI consistency
+			setUrl(nextItem.url);
+			setLogs(prev => [...prev, t('startingQueuedDownload', { url: nextItem.url })]);
+			// Start download
+			startDownloadProcess(nextItem.url, nextItem.subfolder);
+		}
+	}, [isDownloading, downloadQueue, startDownloadProcess, t]);
 
 	const handleBatchImport = async () => {
 		try {
@@ -753,20 +782,20 @@ function App() {
 		}
 	};
 
-        // Keyboard shortcuts - must be after handleDownload definition
-        useEffect(() => {
-                const handleKeyDown = (e: KeyboardEvent) => {
-                        // Cmd/Ctrl + Enter to start download
-                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                                if (!isDownloading && url && location && binariesExist !== false && !isSettingsOpen) {
-                                        handleDownload();
-                                }
-                        }
-                };
+	// Keyboard shortcuts - must be after handleDownload definition
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			// Cmd/Ctrl + Enter to start download
+			if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+				if (!isDownloading && url && location && binariesExist !== false && !isSettingsOpen) {
+					handleDownload();
+				}
+			}
+		};
 
-                window.addEventListener('keydown', handleKeyDown);
-                return () => window.removeEventListener('keydown', handleKeyDown);
-        }, [isDownloading, url, location, binariesExist, isSettingsOpen, handleDownload]);
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [isDownloading, url, location, binariesExist, isSettingsOpen, handleDownload]);
 
 	const handleUpdateBinaries = async () => {
 		setIsUpdatingBinaries(true);
@@ -848,19 +877,19 @@ function App() {
 					animate={{ opacity: 1, y: 0 }}
 					className="text-center space-y-1 mb-4 relative shrink-0"
 				>
-                                        <div className={`absolute top-0 flex items-center gap-2 z-50 no-drag ${isMac ? 'right-0 flex-row-reverse' : 'left-0'}`}>
-                                                <button
-                                                        onClick={() => setIsSettingsOpen(true)}
-                                                        className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
-                                                        title={t('settings')}
-                                                >
-                                                        <SettingsIcon size={18} className={theme.icon} />
-                                                </button>
+					<div className={`absolute top-0 flex items-center gap-2 z-50 no-drag ${isMac ? 'right-0 flex-row-reverse' : 'left-0'}`}>
+						<button
+							onClick={() => setIsSettingsOpen(true)}
+							className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
+							title={t('settings')}
+						>
+							<SettingsIcon size={18} className={theme.icon} />
+						</button>
 
-                                                {presets.length > 0 && (
-                                                        <select
-                                                                onChange={(e) => {
-                                                                        const preset = presets.find(p => p.id === e.target.value);
+						{presets.length > 0 && (
+							<select
+								onChange={(e) => {
+									const preset = presets.find(p => p.id === e.target.value);
 									if (preset) handleApplyPreset(preset);
 								}}
 								className="glass-input rounded-full px-3 py-1.5 text-[10px] text-gray-300 cursor-pointer hover:bg-white/10 transition-colors appearance-none"
@@ -876,464 +905,403 @@ function App() {
 						)}
 					</div>
 
-                                        <h1 className={`text-3xl font-bold font-display bg-gradient-to-r ${theme.primary} ${theme.secondary} ${theme.accent} bg-clip-text text-transparent drop-shadow-2xl tracking-tight`}>
-                                                yt-dlp GUI
-                                        </h1>
-                                        <p className="text-gray-400 text-xs font-light tracking-wide">{t('appSubtitle')}</p>
-                                        <div className="flex justify-center gap-2 pt-3">
-                                                <button
-                                                        onClick={() => setActivePage('download')}
-                                                        className={`px-4 py-2 rounded-full border text-sm transition-colors ${activePage === 'download'
-                                                                ? `${theme.activeTab} border-white/30`
-                                                                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}
-                                                >
-                                                        {t('downloadTab')}
-                                                </button>
-                                                <button
-                                                        onClick={() => setActivePage('queueHistory')}
-                                                        className={`px-4 py-2 rounded-full border text-sm transition-colors ${activePage === 'queueHistory'
-                                                                ? `${theme.activeTab} border-white/30`
-                                                                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}
-                                                >
-                                                        {t('queueHistoryTab')}
-                                                </button>
-                                        </div>
-                                </motion.div>
+					<h1 className={`text-3xl font-bold font-display bg-gradient-to-r ${theme.primary} ${theme.secondary} ${theme.accent} bg-clip-text text-transparent drop-shadow-2xl tracking-tight`}>
+						yt-dlp GUI
+					</h1>
+					<p className="text-gray-400 text-xs font-light tracking-wide">{t('appSubtitle')}</p>
+					<div className="flex justify-center gap-2 pt-3">
+						<button
+							onClick={() => setActivePage('download')}
+							className={`px-4 py-2 rounded-full border text-sm transition-colors ${activePage === 'download'
+								? `${theme.activeTab} border-white/30`
+								: 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}
+						>
+							{t('downloadTab')}
+						</button>
+						<button
+							onClick={() => setActivePage('history')}
+							className={`px-4 py-2 rounded-full border text-sm transition-colors ${activePage === 'history'
+								? `${theme.activeTab} border-white/30`
+								: 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}
+						>
+							{t('history')}
+						</button>
+					</div>
+				</motion.div>
 
-                                <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
-                                        {activePage === 'download' ? (
-                                                <motion.div
-                                                        initial={{ opacity: 0, y: -20 }}
-                                                        animate={{ opacity: 1, y: 0 }}
-                                                        className="flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar pb-4"
-                                                >
-						<div className="glass rounded-3xl p-5 shadow-2xl flex flex-col gap-4 flex-1">
-							{binariesExist === false && (
-								<div className={`bg-red-500/10 border ${theme.border} text-red-400 p-3 rounded-xl flex items-center gap-3 text-xs shrink-0`}>
-									<AlertCircle size={16} />
-									<span>{t('binaryNotFound')}</span>
-								</div>
-							)}
-
-							<div className="shrink-0 space-y-3">
-								<UrlInput url={url} setUrl={setUrl} theme={{ icon: theme.icon }} onImport={handleBatchImport} />
-
-								{/* Video Preview */}
-								{url && (
-									<VideoPreview
-										url={url}
-										isLoading={videoPreviewLoading}
-										error={videoPreviewError}
-										videoInfo={videoInfo}
-										playlistInfo={playlistInfo}
-										onToggle={() => setIsVideoPreviewExpanded(!isVideoPreviewExpanded)}
-										onRefresh={() => fetchVideoInfoDebounced(url)}
-										isExpanded={isVideoPreviewExpanded}
-										theme={{
-											icon: theme.icon,
-											primary: theme.primary,
-											secondary: theme.secondary,
-											accent: theme.accent
-										}}
-									/>
+				<div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
+					{activePage === 'download' ? (
+						<motion.div
+							initial={{ opacity: 0, y: -20 }}
+							animate={{ opacity: 1, y: 0 }}
+							className="flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar pb-4"
+						>
+							<div className="glass rounded-3xl p-5 shadow-2xl flex flex-col gap-4 flex-1">
+								{binariesExist === false && (
+									<div className={`bg-red-500/10 border ${theme.border} text-red-400 p-3 rounded-xl flex items-center gap-3 text-xs shrink-0`}>
+										<AlertCircle size={16} />
+										<span>{t('binaryNotFound')}</span>
+									</div>
 								)}
 
-								{/* Clipboard Monitor Toggle */}
-								<div className="flex items-center justify-end px-1">
-									<div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsClipboardMonitorEnabled(!isClipboardMonitorEnabled)}>
-										<div className={`w-2 h-2 rounded-full transition-colors ${isClipboardMonitorEnabled ? `${theme.toggle} animate-pulse` : 'bg-gray-600'}`} />
-										<span className="text-xs text-gray-400 select-none">{t('clipboardMonitoring')}</span>
-										<div className={`relative w-8 h-4 rounded-full transition-colors duration-200 ${isClipboardMonitorEnabled ? theme.toggleBg : 'bg-white/10'}`}>
-											<div
-												className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full transition-transform duration-200 ${isClipboardMonitorEnabled ? `translate-x-4 ${theme.toggle}` : 'bg-gray-400'}`}
-											/>
+								<div className="shrink-0 space-y-3">
+									<UrlInput url={url} setUrl={setUrl} theme={{ icon: theme.icon }} onImport={handleBatchImport} />
+
+									{/* Video Preview */}
+									{url && (
+										<VideoPreview
+											url={url}
+											isLoading={videoPreviewLoading}
+											error={videoPreviewError}
+											videoInfo={videoInfo}
+											playlistInfo={playlistInfo}
+											onToggle={() => setIsVideoPreviewExpanded(!isVideoPreviewExpanded)}
+											onRefresh={() => fetchVideoInfoDebounced(url)}
+											isExpanded={isVideoPreviewExpanded}
+											theme={{
+												icon: theme.icon,
+												primary: theme.primary,
+												secondary: theme.secondary,
+												accent: theme.accent
+											}}
+										/>
+									)}
+
+									{/* Clipboard Monitor Toggle */}
+									<div className="flex items-center justify-end px-1">
+										<div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsClipboardMonitorEnabled(!isClipboardMonitorEnabled)}>
+											<div className={`w-2 h-2 rounded-full transition-colors ${isClipboardMonitorEnabled ? `${theme.toggle} animate-pulse` : 'bg-gray-600'}`} />
+											<span className="text-xs text-gray-400 select-none">{t('clipboardMonitoring')}</span>
+											<div className={`relative w-8 h-4 rounded-full transition-colors duration-200 ${isClipboardMonitorEnabled ? theme.toggleBg : 'bg-white/10'}`}>
+												<div
+													className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full transition-transform duration-200 ${isClipboardMonitorEnabled ? `translate-x-4 ${theme.toggle}` : 'bg-gray-400'}`}
+												/>
+											</div>
 										</div>
 									</div>
 								</div>
-							</div>
 
-							<div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
-								<FormatSelector
-									options={formatOptions}
-									setOptions={setFormatOptions}
-									theme={{
-										tabActive: theme.activeTab.split(' ')[0],
-										tabActiveText: theme.activeTab.split(' ')[1],
-										tabInactive: 'bg-white/5',
-										tabInactiveText: 'text-gray-400',
-										toggleActive: theme.toggle,
-										toggleTrack: theme.toggleBg,
-										icon: theme.icon
-									}}
-									estimatedSize={estimatedSize}
-								/>
-								<div className="space-y-4">
-									<LocationSelector
-										location={location}
-										setLocation={setLocation}
-										favorites={favorites}
-										onToggleFavorite={handleToggleFavorite}
+								<div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
+									<FormatSelector
+										options={formatOptions}
+										setOptions={setFormatOptions}
 										theme={{
-											icon: theme.icon,
-											activeTab: theme.activeTab,
-											focusRing: theme.focusRing
-										}}
-									/>
-
-									<AdvancedOptions
-										options={advancedOptions}
-										setOptions={setAdvancedOptions}
-										formatType={formatOptions.type}
-										theme={{
+											tabActive: theme.activeTab.split(' ')[0],
+											tabActiveText: theme.activeTab.split(' ')[1],
+											tabInactive: 'bg-white/5',
+											tabInactiveText: 'text-gray-400',
 											toggleActive: theme.toggle,
 											toggleTrack: theme.toggleBg,
 											icon: theme.icon
 										}}
+										estimatedSize={estimatedSize}
 									/>
+									<div className="space-y-4">
+										<LocationSelector
+											location={location}
+											setLocation={setLocation}
+											favorites={favorites}
+											onToggleFavorite={handleToggleFavorite}
+											theme={{
+												icon: theme.icon,
+												activeTab: theme.activeTab,
+												focusRing: theme.focusRing
+											}}
+										/>
 
-									<div className="space-y-2">
-										<details className="group">
-											<summary className="flex items-center gap-2 text-[10px] font-medium text-gray-400 cursor-pointer hover:text-white transition-colors select-none">
-												<Terminal size={12} />
-												{t('customArgs')}
-											</summary>
-											<div className="mt-1">
-												<input
-													type="text"
-													placeholder={t('customArgsPlaceholder')}
-													className="w-full glass-input rounded-xl px-3 py-2 text-[10px] text-gray-300 placeholder-gray-600"
-													id="custom-args"
-												/>
-											</div>
-										</details>
+										<AdvancedOptions
+											options={advancedOptions}
+											setOptions={setAdvancedOptions}
+											formatType={formatOptions.type}
+											theme={{
+												toggleActive: theme.toggle,
+												toggleTrack: theme.toggleBg,
+												icon: theme.icon
+											}}
+										/>
+
+										<div className="space-y-2">
+											<details className="group">
+												<summary className="flex items-center gap-2 text-[10px] font-medium text-gray-400 cursor-pointer hover:text-white transition-colors select-none">
+													<Terminal size={12} />
+													{t('customArgs')}
+												</summary>
+												<div className="mt-1">
+													<input
+														type="text"
+														placeholder={t('customArgsPlaceholder')}
+														className="w-full glass-input rounded-xl px-3 py-2 text-[10px] text-gray-300 placeholder-gray-600"
+														id="custom-args"
+													/>
+												</div>
+											</details>
+										</div>
 									</div>
 								</div>
-							</div>
 
-							<div className="mt-auto pt-2 shrink-0 space-y-3">
+								<div className="mt-auto pt-2 shrink-0 space-y-3">
 
-                                                                <div className="flex gap-2">
-                                                                        <motion.button
-                                                                                whileHover={{ scale: 1.01, boxShadow: "0 0 30px rgba(168, 85, 247, 0.4)" }}
-                                                                                whileTap={{ scale: 0.99 }}
-                                                                                onClick={handleDownload}
-										disabled={isDownloading || !url || !location || binariesExist === false}
-										className={`relative flex-1 py-3 rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-all overflow-hidden ${isDownloading
-											? 'bg-white/5 cursor-not-allowed text-gray-300 border border-white/10'
-											: `${theme.button} text-white shadow-xl ${theme.buttonShadow} border border-white/10`
-											}`}
-									>
-										{/* Progress bar background */}
-										{isDownloading && (
-											<motion.div
-												className={`absolute inset-0 ${theme.button} opacity-30`}
-												initial={{ width: '0%' }}
-												animate={{ width: `${downloadProgress}%` }}
-												transition={{ duration: 0.3 }}
-											/>
-										)}
-
-										<span className="relative z-10 flex items-center gap-2">
-											{isDownloading ? (
-												<>
-													<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-													{t('processing')} {downloadProgress > 0 && `${downloadProgress.toFixed(1)}%`}
-												</>
-											) : (
-												<>
-													<Download size={18} />
-													{t('startDownload')}
-													<span className="text-xs opacity-60 ml-1">({isMac ? '⌘' : 'Ctrl'}+Enter)</span>
-												</>
+									<div className="flex gap-2">
+										<motion.button
+											whileHover={{ scale: 1.01, boxShadow: "0 0 30px rgba(168, 85, 247, 0.4)" }}
+											whileTap={{ scale: 0.99 }}
+											onClick={handleDownload}
+											disabled={isDownloading || !url || !location || binariesExist === false}
+											className={`relative flex-1 py-3 rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-all overflow-hidden ${isDownloading
+												? 'bg-white/5 cursor-not-allowed text-gray-300 border border-white/10'
+												: `${theme.button} text-white shadow-xl ${theme.buttonShadow} border border-white/10`
+												}`}
+										>
+											{/* Progress bar background */}
+											{isDownloading && (
+												<motion.div
+													className={`absolute inset-0 ${theme.button} opacity-30`}
+													initial={{ width: '0%' }}
+													animate={{ width: `${downloadProgress}%` }}
+													transition={{ duration: 0.3 }}
+												/>
 											)}
-                                                                                </span>
-                                                                        </motion.button>
 
-                                                                        <motion.button
-                                                                                whileHover={{ scale: 1.05 }}
-                                                                                whileTap={{ scale: 0.97 }}
-                                                                                onClick={handleAddToQueue}
-                                                                                disabled={!url || !location || binariesExist === false}
-                                                                                className={`px-4 rounded-2xl border transition-all flex items-center gap-2 text-sm font-medium ${!url || !location || binariesExist === false
-                                                                                        ? 'bg-white/5 border-white/10 text-gray-400 cursor-not-allowed'
-                                                                                        : 'bg-white/10 border-white/20 text-white hover:bg-white/15'}`}
-                                                                        >
-                                                                                <ListPlus size={18} />
-                                                                                {isDownloading ? t('addToQueue') : t('queueDownload')}
-                                                                                {downloadQueue.length > 0 && (
-                                                                                        <span className="ml-1 px-2 py-0.5 rounded-full bg-white/10 text-xs text-gray-200">
-                                                                                                {downloadQueue.length}
-                                                                                        </span>
-                                                                                )}
-                                                                        </motion.button>
-
-                                                                        {isDownloading && (
-                                                                                <motion.button
-                                                                                        initial={{ width: 0, opacity: 0 }}
-                                                                                        animate={{ width: 'auto', opacity: 1 }}
-											exit={{ width: 0, opacity: 0 }}
-											whileHover={{ scale: 1.05 }}
-											whileTap={{ scale: 0.95 }}
-											onClick={handleCancelVideoDownload}
-											className="px-4 rounded-2xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/20 flex items-center justify-center"
-											title={t('cancel')}
-										>
-											<XCircle size={20} />
+											<span className="relative z-10 flex items-center gap-2">
+												{isDownloading ? (
+													<>
+														<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+														{progressStage === 'converting' ? (
+															<span className="animate-pulse">{t('converting')} {downloadProgress > 0 && `${downloadProgress.toFixed(1)}%`}</span>
+														) : (
+															<span>{t('processing')} {downloadProgress > 0 && `${downloadProgress.toFixed(1)}%`}</span>
+														)}
+													</>
+												) : (
+													<>
+														<Download size={18} />
+														{t('startDownload')}
+														<span className="text-xs opacity-60 ml-1">({isMac ? '⌘' : 'Ctrl'}+Enter)</span>
+													</>
+												)}
+											</span>
 										</motion.button>
-									)}
-								</div>
 
-                                                                {/* Download Progress Details */}
-                                                                <AnimatePresence>
-                                                                        {isDownloading && (downloadSpeed || downloadedSize || eta) && (
-                                                                                <motion.div
-                                                                                        initial={{ opacity: 0, height: 0 }}
-											animate={{ opacity: 1, height: 'auto' }}
-											exit={{ opacity: 0, height: 0 }}
-											className="overflow-hidden"
+										<motion.button
+											whileHover={{ scale: 1.05 }}
+											whileTap={{ scale: 0.97 }}
+											onClick={handleAddToQueue}
+											disabled={!url || !location || binariesExist === false}
+											className={`px-4 rounded-2xl border transition-all flex items-center gap-2 text-sm font-medium ${!url || !location || binariesExist === false
+												? 'bg-white/5 border-white/10 text-gray-400 cursor-not-allowed'
+												: 'bg-white/10 border-white/20 text-white hover:bg-white/15'}`}
 										>
-											<div className="glass rounded-xl p-3 flex items-center justify-between text-xs">
-												<div className="flex items-center gap-4">
-													{downloadSpeed && (
+											<ListPlus size={18} />
+											{isDownloading ? t('addToQueue') : t('queueDownload')}
+											{downloadQueue.length > 0 && (
+												<span className="ml-1 px-2 py-0.5 rounded-full bg-white/10 text-xs text-gray-200">
+													{downloadQueue.length}
+												</span>
+											)}
+										</motion.button>
+
+										{isDownloading && (
+											<motion.button
+												initial={{ width: 0, opacity: 0 }}
+												animate={{ width: 'auto', opacity: 1 }}
+												exit={{ width: 0, opacity: 0 }}
+												whileHover={{ scale: 1.05 }}
+												whileTap={{ scale: 0.95 }}
+												onClick={handleCancelVideoDownload}
+												className="px-4 rounded-2xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/20 flex items-center justify-center"
+												title={t('cancel')}
+											>
+												<XCircle size={20} />
+											</motion.button>
+										)}
+									</div>
+
+									{/* Download Progress Details */}
+									<AnimatePresence>
+										{isDownloading && (downloadSpeed || downloadedSize || eta) && (
+											<motion.div
+												initial={{ opacity: 0, height: 0 }}
+												animate={{ opacity: 1, height: 'auto' }}
+												exit={{ opacity: 0, height: 0 }}
+												className="overflow-hidden"
+											>
+												<div className="glass rounded-xl p-3 flex items-center justify-between text-xs">
+													<div className="flex items-center gap-4">
+														{downloadSpeed && (
+															<div className="flex items-center gap-1.5">
+																<Zap size={12} className="text-yellow-400" />
+																<span className="text-gray-400">{t('downloadSpeed')}:</span>
+																<span className="text-white font-medium">{downloadSpeed}</span>
+															</div>
+														)}
+														{downloadedSize && totalSize && (
+															<div className="flex items-center gap-1.5">
+																<Download size={12} className="text-emerald-400" />
+																<span className="text-gray-400">{t('downloadedSize')}:</span>
+																<span className="text-white font-medium">{downloadedSize} / {totalSize}</span>
+															</div>
+														)}
+													</div>
+													{eta && eta !== 'Unknown' && (
 														<div className="flex items-center gap-1.5">
-															<Zap size={12} className="text-yellow-400" />
-															<span className="text-gray-400">{t('downloadSpeed')}:</span>
-															<span className="text-white font-medium">{downloadSpeed}</span>
-														</div>
-													)}
-													{downloadedSize && totalSize && (
-														<div className="flex items-center gap-1.5">
-															<Download size={12} className="text-emerald-400" />
-															<span className="text-gray-400">{t('downloadedSize')}:</span>
-															<span className="text-white font-medium">{downloadedSize} / {totalSize}</span>
+															<span className="text-gray-400">{t('remainingTime')}:</span>
+															<span className="text-white font-medium">{eta}</span>
 														</div>
 													)}
 												</div>
-												{eta && eta !== 'Unknown' && (
-													<div className="flex items-center gap-1.5">
-														<span className="text-gray-400">{t('remainingTime')}:</span>
-														<span className="text-white font-medium">{eta}</span>
-													</div>
-												)}
-                                                                                        </div>
-                                                                                </motion.div>
-                                                                        )}
-                                                                </AnimatePresence>
-
-                                                                <div className="flex items-center justify-between text-xs text-gray-300">
-                                                                        <div className="flex items-center gap-2">
-                                                                                <History size={14} className="text-amber-400" />
-                                                                                <span>{t('queueCount', { count: String(downloadQueue.length) })}</span>
-                                                                        </div>
-
-                                                                        <button
-                                                                                onClick={() => setActivePage('queueHistory')}
-                                                                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 transition"
-                                                                        >
-                                                                                <ClipboardList size={14} />
-                                                                                <span>{t('viewQueue')}</span>
-                                                                        </button>
-                                                                </div>
-
-                                                                {/* Console Toggle & Output */}
-                                                                <div className="space-y-2">
-									<div className="flex items-center justify-between">
-										<button
-											onClick={() => setShowConsole(!showConsole)}
-											className="flex items-center gap-2 text-xs text-gray-400 hover:text-white transition-colors"
-										>
-											<Terminal size={12} />
-											<span>{t('consoleOutput')}</span>
-											<motion.div
-												animate={{ rotate: showConsole ? 180 : 0 }}
-												transition={{ duration: 0.2 }}
-											>
-												<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<path d="M6 9l6 6 6-6" />
-												</svg>
 											</motion.div>
-										</button>
+										)}
+									</AnimatePresence>
 
-										{/* Status Toast Placeholder / Display */}
-										<div className="h-8 flex items-center justify-end min-w-[200px]">
-											<AnimatePresence mode="wait">
-												{status !== 'idle' && (
-													<motion.div
-														initial={{ opacity: 0, x: 20 }}
-														animate={{ opacity: 1, x: 0 }}
-														exit={{ opacity: 0, x: 20 }}
-													>
-														<StatusToast
-															status={status}
-															message={
-																status === 'complete' ? t('downloadCompleteMsg') :
-																	status === 'downloading' ? t('downloadingMsg') :
-																		status === 'cancelled' ? t('cancelledMsg') :
-																			t('downloadErrorMsg')
-															}
-															onClose={() => setStatus('idle')}
-														/>
-													</motion.div>
+									<div className="flex items-center justify-between text-xs text-gray-300 relative z-50">
+										<div className="flex items-center gap-2">
+											{/* Queue Count removed as requested */}
+										</div>
+
+										<div className="relative">
+											<button
+												onClick={() => setIsQueueOpen(!isQueueOpen)}
+												className={`flex items-center gap-1 px-3 py-1.5 rounded-lg border transition-all ${isDownloading && downloadQueue.length > 0
+													? 'bg-blue-500/20 text-blue-300 border-blue-500/30 animate-pulse'
+													: 'bg-white/5 hover:bg-white/10 text-gray-200 border-white/10'
+													}`}
+											>
+												<ClipboardList size={14} />
+												{isDownloading && downloadQueue.length > 0 ? (
+													<span>{t('processing')} {1} / {1 + downloadQueue.length}</span>
+												) : (
+													<span>{t('viewQueue')} ({downloadQueue.length})</span>
+												)}
+											</button>
+
+											<AnimatePresence>
+												{isQueueOpen && (
+													<QueueList
+														queue={downloadQueue}
+														onRemove={handleRemoveQueueItem}
+														onMove={handleMoveQueueItem}
+														onClear={handleClearQueue}
+														onClose={() => setIsQueueOpen(false)}
+														isDownloading={isDownloading}
+													/>
 												)}
 											</AnimatePresence>
 										</div>
 									</div>
 
-									<AnimatePresence>
-										{showConsole && (
-											<motion.div
-												initial={{ height: 0, opacity: 0 }}
-												animate={{ height: 200, opacity: 1 }}
-												exit={{ height: 0, opacity: 0 }}
-												className="overflow-hidden"
+									{/* Console Toggle & Output */}
+									<div className="space-y-2">
+										<div className="flex items-center justify-between">
+											<button
+												onClick={() => setShowConsole(!showConsole)}
+												className="flex items-center gap-2 text-xs text-gray-400 hover:text-white transition-colors"
 											>
-												<div className="glass rounded-xl p-3 h-full flex flex-col">
-													<div className="flex justify-end mb-2">
-														<button
-															onClick={() => setLogs([])}
-															className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-colors"
-															title={t('clearLogs')}
+												<Terminal size={12} />
+												<span>{t('consoleOutput')}</span>
+												<motion.div
+													animate={{ rotate: showConsole ? 180 : 0 }}
+													transition={{ duration: 0.2 }}
+												>
+													<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+														<path d="M6 9l6 6 6-6" />
+													</svg>
+												</motion.div>
+											</button>
+
+											{/* Status Toast Placeholder / Display */}
+											<div className="h-8 flex items-center justify-end min-w-[200px]">
+												<AnimatePresence mode="wait">
+													{status !== 'idle' && (
+														<motion.div
+															initial={{ opacity: 0, x: 20 }}
+															animate={{ opacity: 1, x: 0 }}
+															exit={{ opacity: 0, x: 20 }}
 														>
-															<X size={12} />
-														</button>
+															<StatusToast
+																status={status}
+																message={
+																	status === 'complete' ? t('downloadCompleteMsg') :
+																		status === 'downloading' ? t('downloadingMsg') :
+																			status === 'cancelled' ? t('cancelledMsg') :
+																				t('downloadErrorMsg')
+																}
+																onClose={() => setStatus('idle')}
+															/>
+														</motion.div>
+													)}
+												</AnimatePresence>
+											</div>
+										</div>
+
+										<AnimatePresence>
+											{showConsole && (
+												<motion.div
+													initial={{ height: 0, opacity: 0 }}
+													animate={{ height: 200, opacity: 1 }}
+													exit={{ height: 0, opacity: 0 }}
+													className="overflow-hidden"
+												>
+													<div className="glass rounded-xl p-3 h-full flex flex-col">
+														<div className="flex justify-end mb-2">
+															<button
+																onClick={() => setLogs([])}
+																className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-colors"
+																title={t('clearLogs')}
+															>
+																<X size={12} />
+															</button>
+														</div>
+														<div
+															ref={logsContainerRef}
+															className="flex-1 bg-[#0a0a0a]/50 rounded-lg border border-white/5 p-2 overflow-y-auto font-mono text-[10px] text-gray-300 space-y-1 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent shadow-inner"
+														>
+															{logs.length === 0 ? (
+																<div className="h-full flex flex-col items-center justify-center text-gray-600 gap-2 opacity-50">
+																	<Terminal size={16} />
+																	<span>{t('waiting')}</span>
+																</div>
+															) : (
+																<>
+																	{logs.map((log, i) => (
+																		<motion.div
+																			key={i}
+																			initial={{ opacity: 0, y: -3 }}
+																			animate={{ opacity: 1, y: 0 }}
+																			transition={{ duration: 0.15, ease: "easeOut" }}
+																			className="break-all border-l-2 border-transparent hover:border-white/20 pl-2 transition-colors leading-relaxed"
+																		>
+																			{log}
+																		</motion.div>
+																	))}
+																	<div ref={logsEndRef} />
+																</>
+															)}
+														</div>
 													</div>
-													<div
-														ref={logsContainerRef}
-														className="flex-1 bg-[#0a0a0a]/50 rounded-lg border border-white/5 p-2 overflow-y-auto font-mono text-[10px] text-gray-300 space-y-1 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent shadow-inner"
-													>
-														{logs.length === 0 ? (
-															<div className="h-full flex flex-col items-center justify-center text-gray-600 gap-2 opacity-50">
-																<Terminal size={16} />
-																<span>{t('waiting')}</span>
-															</div>
-														) : (
-															<>
-																{logs.map((log, i) => (
-																	<motion.div
-																		key={i}
-																		initial={{ opacity: 0, y: -3 }}
-																		animate={{ opacity: 1, y: 0 }}
-																		transition={{ duration: 0.15, ease: "easeOut" }}
-																		className="break-all border-l-2 border-transparent hover:border-white/20 pl-2 transition-colors leading-relaxed"
-																	>
-																		{log}
-																	</motion.div>
-																))}
-																<div ref={logsEndRef} />
-															</>
-														)}
-													</div>
-												</div>
-											</motion.div>
-										)}
-									</AnimatePresence>
+												</motion.div>
+											)}
+										</AnimatePresence>
+									</div>
 								</div>
 							</div>
-                                                </div>
-                                        </motion.div>
-                                        ) : (
-                                                <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-4 space-y-4">
-                                                        <div className="glass rounded-3xl border border-white/10 shadow-2xl p-6 space-y-4">
-                                                                <div className="flex items-center justify-between">
-                                                                        <div className="flex items-center gap-2 text-lg font-semibold text-white">
-                                                                                <ClipboardList size={20} className="text-amber-400" />
-                                                                                <span>{t('queueManagerTitle')}</span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2 text-xs text-gray-400">
-                                                                                <History size={14} className="text-amber-300" />
-                                                                                <span>{t('queueCount', { count: String(downloadQueue.length) })}</span>
-                                                                        </div>
-                                                                </div>
+						</motion.div>
+					) : (
+						<div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-4 space-y-4">
+							<div className="glass rounded-3xl border border-white/10 shadow-2xl p-4">
+								<DownloadHistory
+									history={downloadHistory}
+									onClearHistory={handleClearHistory}
+									onRemoveItem={handleRemoveHistoryItem}
+								/>
+							</div>
+						</div>
+					)}
 
-                                                                <div className="space-y-3 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
-                                                                        {downloadQueue.length === 0 ? (
-                                                                                <div className="flex flex-col items-center justify-center text-gray-400 py-8 gap-2">
-                                                                                        <ClipboardList size={32} className="text-white/30" />
-                                                                                        <span>{t('queueEmpty')}</span>
-                                                                                </div>
-                                                                        ) : (
-                                                                                downloadQueue.map((item, index) => (
-                                                                                        <div
-                                                                                                key={`${item.url}-${index}`}
-                                                                                                className="flex items-start gap-3 p-3 rounded-2xl bg-white/5 border border-white/10"
-                                                                                        >
-                                                                                                <div className="text-xs text-gray-400 w-10 shrink-0">
-                                                                                                        #{index + 1}
-                                                                                                </div>
-                                                                                                <div className="flex-1 min-w-0">
-                                                                                                        <div className="text-sm text-white break-all font-medium">
-                                                                                                                {item.url}
-                                                                                                        </div>
-                                                                                                        {item.subfolder && (
-                                                                                                                <div className="text-xs text-gray-400 mt-1">
-                                                                                                                        {t('queueSubfolder', { subfolder: item.subfolder })}
-                                                                                                                </div>
-                                                                                                        )}
-                                                                                                </div>
-                                                                                                <div className="flex items-center gap-1">
-                                                                                                        <button
-                                                                                                                onClick={() => handleMoveQueueItem(index, 'up')}
-                                                                                                                disabled={index === 0}
-                                                                                                                className="p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                                                                aria-label={t('moveUp')}
-                                                                                                        >
-                                                                                                                <ArrowUp size={16} />
-                                                                                                        </button>
-                                                                                                        <button
-                                                                                                                onClick={() => handleMoveQueueItem(index, 'down')}
-                                                                                                                disabled={index === downloadQueue.length - 1}
-                                                                                                                className="p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                                                                aria-label={t('moveDown')}
-                                                                                                        >
-                                                                                                                <ArrowDown size={16} />
-                                                                                                        </button>
-                                                                                                        <button
-                                                                                                                onClick={() => handleRemoveQueueItem(index)}
-                                                                                                                className="p-2 rounded-full hover:bg-red-500/20 text-red-300 hover:text-red-200"
-                                                                                                                aria-label={t('removeFromQueue')}
-                                                                                                        >
-                                                                                                                <Trash2 size={16} />
-                                                                                                        </button>
-                                                                                                </div>
-                                                                                        </div>
-                                                                                ))
-                                                                        )}
-                                                                </div>
+				</div>
 
-                                                                <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/10">
-                                                                        <button
-                                                                                onClick={handleClearQueue}
-                                                                                disabled={downloadQueue.length === 0}
-                                                                                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/20 text-red-200 hover:bg-red-500/30 border border-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                        >
-                                                                                <Trash2 size={16} />
-                                                                                <span>{t('clearQueue')}</span>
-                                                                        </button>
-
-                                                                        <button
-                                                                                onClick={() => setActivePage('download')}
-                                                                                className="px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 border border-white/20"
-                                                                        >
-                                                                                {t('downloadTab')}
-                                                                        </button>
-                                                                </div>
-                                                        </div>
-
-                                                        <div className="glass rounded-3xl border border-white/10 shadow-2xl p-4">
-                                                                <DownloadHistory
-                                                                        history={downloadHistory}
-                                                                        onClearHistory={handleClearHistory}
-                                                                        onRemoveItem={handleRemoveHistoryItem}
-                                                                />
-                                                        </div>
-                                                </div>
-                                        )}
-
-                                </div>
-
-                                <SettingsModal
-                                        isOpen={isSettingsOpen}
-                                        onClose={() => setIsSettingsOpen(false)}
+				<SettingsModal
+					isOpen={isSettingsOpen}
+					onClose={() => setIsSettingsOpen(false)}
 					presets={presets}
 					onSavePreset={handleSavePreset}
 					onDeletePreset={handleDeletePreset}
