@@ -11,7 +11,8 @@
     "build": "tauri build",
     "build:frontend": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.1",
