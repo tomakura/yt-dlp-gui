@@ -39,6 +39,7 @@ export const translations = {
     audioCodec: '音声コーデック',
     videoBitrate: '動画ビットレート',
     audioBitrateConv: '音声ビットレート',
+    audioBitrate: '音声ビットレート',
     copy: 'コピー (無変換)',
 
     // Location Selector
@@ -135,6 +136,10 @@ export const translations = {
     upToDate: '最新バージョンを使用中です',
     openDownloadPage: 'ダウンロードページを開く',
     updateCheckFailed: '更新の確認に失敗しました',
+    autoUpdateBinaries: 'バイナリの自動更新',
+    autoUpdateBinariesDesc: '起動時に新しいバージョンがあれば自動的に更新します',
+    appUpdate: 'アプリケーション更新',
+    appUpdateDesc: 'アプリケーション自体の更新を確認します',
 
     // Ko-fi
     supportDevelopment: '開発を支援する',
@@ -286,6 +291,7 @@ export const translations = {
     audioCodec: 'Audio Codec',
     videoBitrate: 'Video Bitrate',
     audioBitrateConv: 'Audio Bitrate',
+    audioBitrate: 'Audio Bitrate',
     copy: 'Copy (No conversion)',
 
     // Location Selector
@@ -382,6 +388,10 @@ export const translations = {
     upToDate: 'You are using the latest version',
     openDownloadPage: 'Open Download Page',
     updateCheckFailed: 'Failed to check for updates',
+    autoUpdateBinaries: 'Auto-update Binaries',
+    autoUpdateBinariesDesc: 'Automatically update binaries on startup if new versions are available',
+    appUpdate: 'App Update',
+    appUpdateDesc: 'Check for application updates',
 
     // Ko-fi
     supportDevelopment: 'Support Development',
@@ -402,6 +412,8 @@ export const translations = {
     removeFromHistory: 'Remove from History',
     success: 'Success',
     failed: 'Failed',
+    yesterday: 'Yesterday',
+    daysAgo: '{days} days ago',
     titleUnknown: 'Unknown Title',
     items: 'items',
 

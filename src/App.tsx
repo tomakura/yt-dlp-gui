@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Download, Terminal, AlertCircle, X, Settings as SettingsIcon, History, XCircle, Zap, ListPlus, ArrowUp, ArrowDown, Trash2, ClipboardList } from 'lucide-react';
+import { check } from '@tauri-apps/plugin-updater';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UrlInput } from './components/UrlInput';
 import { FormatSelector } from './components/FormatSelector';
@@ -179,6 +180,14 @@ function App() {
 		localStorage.setItem('notificationsEnabled', String(notificationsEnabled));
 	}, [notificationsEnabled]);
 
+	const [autoUpdateBinaries, setAutoUpdateBinaries] = useState(() => {
+		return localStorage.getItem('autoUpdateBinaries') === 'true';
+	});
+
+	useEffect(() => {
+		localStorage.setItem('autoUpdateBinaries', String(autoUpdateBinaries));
+	}, [autoUpdateBinaries]);
+
 	// Batch Download Queue
 	const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>(() => {
 		const saved = localStorage.getItem('downloadQueue');
@@ -268,14 +277,31 @@ function App() {
 			let videoSize = matchingVideoFormat?.filesize || matchingVideoFormat?.filesize_approx || 0;
 
 			// If no filesize, estimate from bitrate and duration
-			if (!videoSize && matchingVideoFormat?.tbr && duration > 0) {
-				// tbr is total bitrate in kbps
-				videoSize = Math.round((matchingVideoFormat.tbr * 1000 * duration) / 8);
+			if (!videoSize && duration > 0) {
+				if (matchingVideoFormat?.tbr) {
+					// tbr is total bitrate in kbps
+					videoSize = Math.round((matchingVideoFormat.tbr * 1000 * duration) / 8);
+				} else {
+					// Fallback based on resolution
+					const height = matchingVideoFormat?.height || 0;
+					let estimatedBitrate = 0;
+					if (height >= 2160) estimatedBitrate = 15000;
+					else if (height >= 1440) estimatedBitrate = 8000;
+					else if (height >= 1080) estimatedBitrate = 3000;
+					else if (height >= 720) estimatedBitrate = 1500;
+					else if (height >= 480) estimatedBitrate = 800;
+					else if (height >= 360) estimatedBitrate = 500;
+					else estimatedBitrate = 300;
+
+					videoSize = Math.round((estimatedBitrate * 1000 * duration) / 8);
+				}
 			}
 
-			// Get best audio size
+			// Get best audio size if video doesn't have audio
 			let audioSize = 0;
-			if (audioFormats.length > 0) {
+			const videoHasAudio = matchingVideoFormat?.acodec && matchingVideoFormat.acodec !== 'none';
+
+			if (!videoHasAudio && audioFormats.length > 0) {
 				const bestAudio = [...audioFormats].sort((a, b) =>
 					(b.filesize || b.filesize_approx || 0) - (a.filesize || a.filesize_approx || 0)
 				)[0];
@@ -447,7 +473,7 @@ function App() {
 						setVideoPreviewLoading(false);
 					}
 				}
-			}, 800); // Debounce 800ms
+			}, 500); // Debounce 500ms
 		},
 		[]
 	);
@@ -490,6 +516,43 @@ function App() {
 			setBinariesExist(false);
 		}
 	};
+
+	// Auto-update binaries and app check on startup
+	useEffect(() => {
+		const checkUpdates = async () => {
+			// 1. Check App Update
+			try {
+				const update = await check();
+				if (update && update.available) {
+					setLogs(prev => [...prev, t('newVersionAvailable').replace('{version}', update.version)]);
+				}
+			} catch (e: any) {
+				console.error('Failed to check app update:', e);
+			}
+		};
+
+		checkUpdates();
+	}, [t]);
+
+	// Effect to trigger binary update if auto-update is enabled and updates are available
+	useEffect(() => {
+		if (autoUpdateBinaries && binariesExist && latestBinaryVersions && binaryVersions) {
+			const shouldUpdateYtDlp = latestBinaryVersions.ytDlp !== 'Unknown' && latestBinaryVersions.ytDlp !== binaryVersions.ytDlp;
+
+			// For ffmpeg, simplest logic: update if different and not unknown
+			const shouldUpdateFfmpeg = latestBinaryVersions.ffmpeg !== 'Unknown' &&
+				latestBinaryVersions.ffmpeg !== 'latest' &&
+				!binaryVersions.ffmpeg.startsWith('N-') &&
+				binaryVersions.ffmpeg !== latestBinaryVersions.ffmpeg;
+
+			if (shouldUpdateYtDlp && !isUpdatingBinaries) {
+				handleUpdateBinaries();
+			}
+
+			// NOTE: We don't auto-update ffmpeg yet to avoid conflicts or long downloads without explicit user consent/visibility
+			// But we could add it here if desired.
+		}
+	}, [autoUpdateBinaries, binariesExist, binaryVersions, latestBinaryVersions]);
 
 	useEffect(() => {
 		// Load presets and template from localStorage
@@ -1286,7 +1349,13 @@ function App() {
 							</div>
 						</motion.div>
 					) : (
-						<div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-4 space-y-4">
+						<motion.div
+							initial={{ opacity: 0, scale: 0.95, y: 20 }}
+							animate={{ opacity: 1, scale: 1, y: 0 }}
+							exit={{ opacity: 0, scale: 0.95, y: 20 }}
+							transition={{ duration: 0.2 }}
+							className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-4 space-y-4"
+						>
 							<div className="glass rounded-3xl border border-white/10 shadow-2xl p-4">
 								<DownloadHistory
 									history={downloadHistory}
@@ -1294,7 +1363,7 @@ function App() {
 									onRemoveItem={handleRemoveHistoryItem}
 								/>
 							</div>
-						</div>
+						</motion.div>
 					)}
 
 				</div>
@@ -1322,6 +1391,8 @@ function App() {
 					onClearBinaryStatus={() => setBinaryStatus(null)}
 					notificationsEnabled={notificationsEnabled}
 					setNotificationsEnabled={setNotificationsEnabled}
+					autoUpdateBinaries={autoUpdateBinaries}
+					setAutoUpdateBinaries={setAutoUpdateBinaries}
 				/>
 
 			</div>

@@ -131,9 +131,17 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
   return (
     <div className="glass rounded-2xl overflow-hidden">
       {/* Header - Always visible */}
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/5 transition-colors"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/5 transition-colors cursor-pointer outline-none focus:bg-white/5"
       >
         <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
           <Film size={14} className={themeStyles.icon} />
@@ -174,7 +182,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
           )}
           {isExpanded ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
         </div>
-      </button>
+      </div>
 
       {/* Content - Collapsible */}
       <AnimatePresence>

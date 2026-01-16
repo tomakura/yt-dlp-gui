@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Save, FolderOpen, Plus, Trash2, Film, Music, Terminal, Palette, Layout, Monitor, HardDrive, Settings as SettingsIcon, Download, XCircle, Info, Loader2, Heart, Globe, Bell } from 'lucide-react';
+import { X, Save, FolderOpen, Plus, Trash2, Film, Music, Terminal, Palette, Layout, Monitor, HardDrive, Settings as SettingsIcon, Download, XCircle, Info, Loader2, Heart, Globe, Bell, RefreshCw } from 'lucide-react';
+import { check } from '@tauri-apps/plugin-updater';
 import { useI18n } from '../i18n';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Preset } from '../types/Preset';
@@ -30,6 +31,8 @@ interface SettingsModalProps {
 	onClearBinaryStatus: () => void;
 	notificationsEnabled: boolean;
 	setNotificationsEnabled: (enabled: boolean) => void;
+	autoUpdateBinaries: boolean;
+	setAutoUpdateBinaries: (enabled: boolean) => void;
 }
 
 type Tab = 'general' | 'appearance' | 'binaries' | 'presets' | 'info';
@@ -56,7 +59,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	latestBinaryVersions,
 	onClearBinaryStatus,
 	notificationsEnabled,
-	setNotificationsEnabled
+	setNotificationsEnabled,
+	autoUpdateBinaries,
+	setAutoUpdateBinaries
 }) => {
 	const { t, language, setLanguage } = useI18n();
 	const [activeTab, setActiveTab] = useState<Tab>('general');
@@ -72,21 +77,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	const handleCheckAppUpdate = async () => {
 		setAppUpdateStatus({ checking: true, available: null });
 		try {
-			const result = await window.electron.checkAppUpdate();
-			if (result.error) {
-				setAppUpdateStatus({ checking: false, available: null, message: t('updateCheckFailed') });
+			const update = await check();
+			if (update && update.available) {
+				setAppUpdateStatus({
+					checking: false,
+					available: true,
+					version: update.version,
+					url: '',
+					message: t('newVersionAvailable').replace('{version}', update.version)
+				});
+				// Ask user if they want to update? Not implemented in UI yet, but we inform them.
 			} else {
 				setAppUpdateStatus({
 					checking: false,
-					available: result.available,
-					version: result.latestVersion,
-					url: result.url,
-					message: result.available
-						? t('newVersionAvailable').replace('{version}', result.latestVersion || '')
-						: t('upToDate')
+					available: false,
+					message: t('upToDate')
 				});
 			}
-		} catch (e) {
+		} catch (e: any) {
+			console.error("Update check failed:", e);
 			setAppUpdateStatus({ checking: false, available: null, message: t('updateCheckFailed') });
 		}
 	};
@@ -365,6 +374,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 															</div>
 														</div>
 													</div>
+
+													{/* Auto-update Toggle */}
+													<button
+														onClick={() => setAutoUpdateBinaries(!autoUpdateBinaries)}
+														className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${autoUpdateBinaries
+																? 'bg-blue-500/20 border-blue-500/30 text-blue-300'
+																: 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+															}`}
+														title={t('autoUpdateBinariesDesc')}
+													>
+														<div className={`w-8 h-4 rounded-full relative transition-colors ${autoUpdateBinaries ? 'bg-blue-500' : 'bg-gray-600'
+															}`}>
+															<div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${autoUpdateBinaries ? 'left-[18px]' : 'left-0.5'
+																}`} />
+														</div>
+														<span className="text-xs">{t('autoUpdateBinaries')}</span>
+													</button>
 												</div>
 
 												{binariesExist && (

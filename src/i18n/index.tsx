@@ -23,7 +23,8 @@ export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [language]);
 
   const t = (key: TranslationKey, params?: Record<string, string>): string => {
-    let text = translations[language][key] || translations.ja[key] || key;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let text = (translations[language] as any)[key] || (translations.ja as any)[key] || key;
     if (params) {
       Object.entries(params).forEach(([k, v]) => {
         text = text.replace(`{${k}}`, v);
