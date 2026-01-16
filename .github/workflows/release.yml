@@ -14,10 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-13' # Intel Mac
+          - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
             target: 'x86_64-apple-darwin'
-          - platform: 'macos-14' # M1 Mac
+          - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             target: 'aarch64-apple-darwin'
           - platform: 'windows-latest'
