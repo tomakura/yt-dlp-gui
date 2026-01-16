@@ -15,17 +15,11 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
-            target: 'x86_64-apple-darwin'
-          - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
-            target: 'aarch64-apple-darwin'
+            args: '--target universal-apple-darwin'
           - platform: 'windows-latest'
             args: '--target x86_64-pc-windows-msvc'
-            target: 'x86_64-pc-windows-msvc'
           - platform: 'windows-latest'
             args: '--target aarch64-pc-windows-msvc'
-            target: 'aarch64-pc-windows-msvc'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -39,17 +33,17 @@ jobs:
       - name: install rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.platform == 'windows-latest' && 'x86_64-pc-windows-msvc,aarch64-pc-windows-msvc' || '' }}
 
       - name: install dependencies (npm)
         run: npm install
 
       - name: Build and Release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # the action automatically replaces __VERSION__ with the app version
+          tagName: v__VERSION__
           releaseName: 'yt-dlp GUI v__VERSION__'
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: true
