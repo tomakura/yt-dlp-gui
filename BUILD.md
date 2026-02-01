@@ -20,6 +20,12 @@ npm run dev
 
 開発サーバーが起動し、ホットリロードが有効になります。
 
+Electron で起動する場合は別ターミナルで以下を実行:
+
+```bash
+npm run dev:electron
+```
+
 ## ビルドコマンド / Build Commands
 
 ### Mac版（Universal Binary）
@@ -28,7 +34,7 @@ npm run dev
 npm run electron:build -- --mac
 ```
 
-出力: `release/yt-dlp GUI-1.0.0-universal.dmg`
+出力: `release/yt-dlp GUI-<version>-universal.dmg`
 
 - Intel Mac と Apple Silicon Mac の両方で動作
 - コード署名なしでビルド
@@ -39,7 +45,7 @@ npm run electron:build -- --mac
 npm run electron:build -- --win --x64
 ```
 
-出力: `release/yt-dlp GUI Setup 1.0.0-x64.exe`
+出力: `release/yt-dlp GUI Setup <version>-x64.exe`
 
 - 一般的な64ビットWindowsマシン向け
 
@@ -49,7 +55,7 @@ npm run electron:build -- --win --x64
 npm run electron:build -- --win --arm64
 ```
 
-出力: `release/yt-dlp GUI Setup 1.0.0-arm64.exe`
+出力: `release/yt-dlp GUI Setup <version>-arm64.exe`
 
 - Surface Pro X、Snapdragon搭載PC向け
 

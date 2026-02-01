@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, FolderOpen, Plus, Trash2, Film, Music, Terminal, Palette, Layout, Monitor, HardDrive, Settings as SettingsIcon, Download, XCircle, Info, Loader2, Heart, Globe, Bell, RefreshCw } from 'lucide-react';
-import { check } from '@tauri-apps/plugin-updater';
 import { useI18n } from '../i18n';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Preset } from '../types/Preset';
@@ -23,6 +22,7 @@ interface SettingsModalProps {
 	onDownloadBinaries: () => void;
 	binaryStatus: { message: string; type: 'info' | 'success' | 'error' } | null;
 	binaryUpdateProgress: BinaryUpdateProgress | null;
+	isBinaryVersionLoading: boolean;
 	currentTheme: any;
 	setTheme: (theme: any) => void;
 	themes: any;
@@ -52,6 +52,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	onDownloadBinaries,
 	binaryStatus,
 	binaryUpdateProgress,
+	isBinaryVersionLoading,
 	currentTheme,
 	setTheme,
 	themes,
@@ -77,14 +78,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	const handleCheckAppUpdate = async () => {
 		setAppUpdateStatus({ checking: true, available: null });
 		try {
-			const update = await check();
+			const update = await window.electron.checkAppUpdate();
 			if (update && update.available) {
+				const version = update.latestVersion || 'latest';
 				setAppUpdateStatus({
 					checking: false,
 					available: true,
-					version: update.version,
-					url: '',
-					message: t('newVersionAvailable').replace('{version}', update.version)
+					version,
+					url: update.url,
+					message: t('newVersionAvailable').replace('{version}', version)
 				});
 				// Ask user if they want to update? Not implemented in UI yet, but we inform them.
 			} else {
@@ -398,7 +400,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 														<div className="bg-white/5 p-3 rounded-xl border border-white/5">
 															<div className="text-xs text-gray-500 mb-1">yt-dlp {t('version')}</div>
 															<div className="flex items-center gap-2">
-																<div className="text-sm font-mono text-gray-200">{binaryVersions?.ytDlp || t('unknown')}</div>
+																{isBinaryVersionLoading ? (
+																	<div className="flex items-center gap-2 text-sm text-gray-300">
+																		<Loader2 size={14} className="animate-spin" />
+																		<span>{t('checking')}</span>
+																	</div>
+																) : (
+																	<div className="text-sm font-mono text-gray-200">{binaryVersions?.ytDlp || t('unknown')}</div>
+																)}
 																{binaryVersions?.ytDlp && binaryVersions.ytDlp !== 'Not detected' && (
 																	latestBinaryVersions?.ytDlp && latestBinaryVersions.ytDlp !== 'Unknown' ? (
 																		binaryVersions.ytDlp === latestBinaryVersions.ytDlp ? (
@@ -415,7 +424,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 														<div className="bg-white/5 p-3 rounded-xl border border-white/5">
 															<div className="text-xs text-gray-500 mb-1">ffmpeg {t('version')}</div>
 															<div className="flex items-center gap-2">
-																<div className="text-sm font-mono text-gray-200">{binaryVersions?.ffmpeg || t('unknown')}</div>
+																{isBinaryVersionLoading ? (
+																	<div className="flex items-center gap-2 text-sm text-gray-300">
+																		<Loader2 size={14} className="animate-spin" />
+																		<span>{t('checking')}</span>
+																	</div>
+																) : (
+																	<div className="text-sm font-mono text-gray-200">{binaryVersions?.ffmpeg || t('unknown')}</div>
+																)}
 																{binaryVersions?.ffmpeg && binaryVersions.ffmpeg !== 'Not detected' && (
 																	// Show "latest" badge if: ffmpeg is N-* version (yt-dlp/FFmpeg-Builds latest), versions match, or API returned "latest" marker
 																	(binaryVersions.ffmpeg.startsWith('N-') ||
@@ -431,10 +447,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 																		</span>
 																	)
 																)}
-															</div>
-														</div>
-													</div>
-												)}
+											</div>
+										</div>
+									</div>
+								)}
 
 												<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 													{binariesExist ? (
@@ -620,7 +636,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													</div>
 													<div>
 														<h4 className="text-xl font-bold text-white">yt-dlp-gui</h4>
-														<p className="text-sm text-gray-400">Version 1.1.0</p>
+														<p className="text-sm text-gray-400">Version 1.3.1</p>
 													</div>
 												</div>
 
@@ -631,11 +647,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													</div>
 													<div className="flex justify-between py-2 border-b border-white/5">
 														<span className="text-gray-500">yt-dlp</span>
-														<span className="font-mono">{binaryVersions?.ytDlp || t('unknown')}</span>
+														{isBinaryVersionLoading ? (
+															<span className="flex items-center gap-2 text-gray-300">
+																<Loader2 size={14} className="animate-spin" />
+																<span>{t('checking')}</span>
+															</span>
+														) : (
+															<span className="font-mono">{binaryVersions?.ytDlp || t('unknown')}</span>
+														)}
 													</div>
 													<div className="flex justify-between py-2 border-b border-white/5">
 														<span className="text-gray-500">ffmpeg</span>
-														<span className="font-mono">{binaryVersions?.ffmpeg || t('unknown')}</span>
+														{isBinaryVersionLoading ? (
+															<span className="flex items-center gap-2 text-gray-300">
+																<Loader2 size={14} className="animate-spin" />
+																<span>{t('checking')}</span>
+															</span>
+														) : (
+															<span className="font-mono">{binaryVersions?.ffmpeg || t('unknown')}</span>
+														)}
 													</div>
 												</div>
 

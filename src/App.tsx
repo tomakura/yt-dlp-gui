@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Download, Terminal, AlertCircle, X, Settings as SettingsIcon, History, XCircle, Zap, ListPlus, ArrowUp, ArrowDown, Trash2, ClipboardList } from 'lucide-react';
-import { check } from '@tauri-apps/plugin-updater';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UrlInput } from './components/UrlInput';
 import { FormatSelector } from './components/FormatSelector';
@@ -201,6 +200,7 @@ function App() {
 	const [binaryStatus, setBinaryStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
 	const [binaryUpdateProgress, setBinaryUpdateProgress] = useState<BinaryUpdateProgress | null>(null);
 	const [isUpdatingBinaries, setIsUpdatingBinaries] = useState(false);
+	const [isBinaryVersionLoading, setIsBinaryVersionLoading] = useState(false);
 	const [binaryVersions, setBinaryVersions] = useState<{ ytDlp: string; ffmpeg: string } | null>(null);
 	const [latestBinaryVersions, setLatestBinaryVersions] = useState<{ ytDlp: string; ffmpeg: string } | null>(null);
 
@@ -498,8 +498,13 @@ function App() {
 			setBinariesExist(allExist);
 
 			if (allExist) {
-				const versions = await window.electron.getBinaryVersions();
-				setBinaryVersions(versions);
+				setIsBinaryVersionLoading(true);
+				try {
+					const versions = await window.electron.getBinaryVersions();
+					setBinaryVersions(versions);
+				} finally {
+					setIsBinaryVersionLoading(false);
+				}
 
 				// Fetch latest versions in background
 				window.electron.getLatestBinaryVersions().then(latest => {
@@ -509,6 +514,31 @@ function App() {
 
 			if (!allExist) {
 				setLogs(prev => [...prev, 'Error: yt-dlp or ffmpeg binaries not found.']);
+				try {
+					const migration = await window.electron.migrateLegacyBinaries();
+					if (migration?.migrated) {
+						setLogs(prev => [
+							...prev,
+							`Migrated legacy binaries: ${migration.copied.join(', ')}`
+						]);
+						const recheck = await window.electron.checkBinaries();
+						const allExistAfter = recheck.ytdlp && recheck.ffmpeg;
+						setBinariesExist(allExistAfter);
+						if (allExistAfter) {
+							setIsBinaryVersionLoading(true);
+							try {
+								const versions = await window.electron.getBinaryVersions();
+								setBinaryVersions(versions);
+							} finally {
+								setIsBinaryVersionLoading(false);
+							}
+						}
+					} else if (migration?.error) {
+						setLogs(prev => [...prev, `Legacy binary migration failed: ${migration.error}`]);
+					}
+				} catch (err) {
+					console.error('Failed to migrate legacy binaries', err);
+				}
 				// setStatus('error'); // Don't set error status immediately on load, just show warning
 			}
 		} catch (error) {
@@ -522,9 +552,10 @@ function App() {
 		const checkUpdates = async () => {
 			// 1. Check App Update
 			try {
-				const update = await check();
+				const update = await window.electron.checkAppUpdate();
 				if (update && update.available) {
-					setLogs(prev => [...prev, t('newVersionAvailable').replace('{version}', update.version)]);
+					const version = update.latestVersion || 'latest';
+					setLogs(prev => [...prev, t('newVersionAvailable').replace('{version}', version)]);
 				}
 			} catch (e: any) {
 				console.error('Failed to check app update:', e);
@@ -1383,6 +1414,7 @@ function App() {
 					onDownloadBinaries={handleDownloadBinaries}
 					binaryStatus={binaryStatus}
 					binaryUpdateProgress={binaryUpdateProgress}
+					isBinaryVersionLoading={isBinaryVersionLoading}
 					currentTheme={currentTheme}
 					setTheme={setCurrentTheme}
 					themes={themes}

@@ -86,6 +86,7 @@ declare global {
       openFileDialog: () => Promise<{ content: string; filePath: string } | null>;
       getDefaultDownloadPath: () => Promise<string>;
       checkBinaries: () => Promise<{ ytdlp: boolean; ffmpeg: boolean; path: string }>;
+      migrateLegacyBinaries: () => Promise<{ migrated: boolean; copied: string[]; sources: string[]; skipped?: string; error?: string }>;
       getBinaryVersions: () => Promise<{ ytDlp: string; ffmpeg: string }>;
       getLatestBinaryVersions: () => Promise<{ ytDlp: string; ffmpeg: string }>;
       startDownload: (payload: DownloadPayload) => void;
