@@ -90,7 +90,7 @@ const ytDlpBinaryPath = (ytDlp as unknown as { path?: string }).path;
 const resolveYtDlpPath = () => {
   const bundled = path.join(appPath, isWindows ? 'yt-dlp.exe' : 'yt-dlp');
   if (fs.existsSync(bundled)) return bundled;
-  
+
   if (ytDlpBinaryPath && fs.existsSync(ytDlpBinaryPath)) return ytDlpBinaryPath;
   return commandExists('yt-dlp') ? 'yt-dlp' : null;
 };
@@ -119,15 +119,15 @@ let isDownloadCancelled = false;
 const downloadFile = (url: string, destination: string, onProgress?: (percent: number, downloaded: number, total: number, speed: number) => void) =>
   new Promise<void>((resolve, reject) => {
     ensureAppPath();
-    
+
     const makeRequest = (requestUrl: string) => {
       const file = fs.createWriteStream(destination);
-      
+
       const req = https.get(requestUrl, (res: any) => {
         // Handle redirects
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           file.close();
-          fs.unlink(destination, () => {}); // Clean up empty file
+          fs.unlink(destination, () => { }); // Clean up empty file
           let redirectUrl = res.headers.location;
           if (redirectUrl.startsWith('/')) {
             const parsedUrl = new URL(requestUrl);
@@ -141,7 +141,7 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
           makeRequest(redirectUrl);
           return;
         }
-        
+
         if (res.statusCode && res.statusCode >= 400) {
           file.close();
           reject(new Error(`HTTP Error: ${res.statusCode}`));
@@ -157,12 +157,12 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
         res.on('data', (chunk: Buffer) => {
           downloaded += chunk.length;
           const now = Date.now();
-          
+
           // Update every 100ms to avoid excessive IPC
           if (now - lastUpdate > 100 || downloaded === totalSize) {
             const elapsed = (now - startTime) / 1000; // seconds
             const speed = elapsed > 0 ? downloaded / elapsed : 0; // bytes/sec
-            
+
             if (onProgress) {
               if (totalSize > 0) {
                 onProgress(Math.round((downloaded / totalSize) * 100), downloaded, totalSize, speed);
@@ -189,7 +189,7 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
           });
         });
       });
-      
+
       req.on('error', (err) => {
         file.close();
         // Only unlink if file exists to avoid ENOENT
@@ -206,7 +206,7 @@ const downloadFile = (url: string, destination: string, onProgress?: (percent: n
           req.destroy();
           file.close();
           if (fs.existsSync(destination)) {
-            fs.unlink(destination, () => {});
+            fs.unlink(destination, () => { });
           }
           reject(new Error('Download cancelled'));
         });
@@ -229,21 +229,21 @@ const downloadYtDlp = async (onProgress?: (percent: number, downloaded: number, 
 const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number, total: number, speed: number) => void, onStatus?: (status: string) => void) => {
   const isMac = process.platform === 'darwin';
   const isLinux = process.platform === 'linux';
-  
+
   const ffmpegTarget = path.join(appPath, isWindows ? 'ffmpeg.exe' : 'ffmpeg');
   const ffprobeTarget = path.join(appPath, isWindows ? 'ffprobe.exe' : 'ffprobe');
-  
+
   // For macOS, use ffbinaries (GitHub Releases) for faster download
   // Note: Currently using x64 builds which work on ARM64 via Rosetta 2
   if (isMac) {
     try {
       onStatus?.('ffmpeg と ffprobe をダウンロード中 (GitHub)...');
-      
+
       // Using ffbinaries v6.1
       const version = '6.1';
       const ffmpegUrl = `https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v${version}/ffmpeg-${version}-macos-64.zip`;
       const ffprobeUrl = `https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v${version}/ffprobe-${version}-macos-64.zip`;
-      
+
       const ffmpegZip = path.join(appPath, 'ffmpeg.zip');
       const ffprobeZip = path.join(appPath, 'ffprobe.zip');
 
@@ -254,13 +254,13 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         const downloaded = ffmpegState.downloaded + ffprobeState.downloaded;
         const total = ffmpegState.total + ffprobeState.total;
         const speed = ffmpegState.speed + ffprobeState.speed;
-        
+
         if (total > 0) {
           const percent = Math.round((downloaded / total) * 100);
           // Map 0-100% download to 0-80% overall
           onProgress?.(Math.round(percent * 0.8), downloaded, total, speed);
         } else if (downloaded > 0) {
-           onProgress?.(-1, downloaded, 0, speed);
+          onProgress?.(-1, downloaded, 0, speed);
         }
       };
 
@@ -275,11 +275,11 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
       });
 
       await Promise.all([p1, p2]);
-      
+
       // Extract (80-100%)
       onStatus?.('ffmpeg/ffprobe を展開中...');
       onProgress?.(85, 0, 0, 0);
-      
+
       await Promise.all([
         execAsync(`unzip -o "${ffmpegZip}" -d "${appPath}"`),
         execAsync(`unzip -o "${ffprobeZip}" -d "${appPath}"`)
@@ -287,14 +287,14 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
 
       if (fs.existsSync(ffmpegZip)) fs.unlinkSync(ffmpegZip);
       if (fs.existsSync(ffprobeZip)) fs.unlinkSync(ffprobeZip);
-      
+
       if (fs.existsSync(ffmpegTarget)) {
         fs.chmodSync(ffmpegTarget, 0o755);
         // Remove quarantine attribute on macOS
         if (isMac) {
           try {
-            execAsync(`xattr -d com.apple.quarantine "${ffmpegTarget}"`).catch(() => {});
-          } catch (e) {}
+            execAsync(`xattr -d com.apple.quarantine "${ffmpegTarget}"`).catch(() => { });
+          } catch (e) { }
         }
       }
       if (fs.existsSync(ffprobeTarget)) {
@@ -302,20 +302,20 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         // Remove quarantine attribute on macOS
         if (isMac) {
           try {
-            execAsync(`xattr -d com.apple.quarantine "${ffprobeTarget}"`).catch(() => {});
-          } catch (e) {}
+            execAsync(`xattr -d com.apple.quarantine "${ffprobeTarget}"`).catch(() => { });
+          } catch (e) { }
         }
       }
-      
+
       onProgress?.(100, 0, 0, 0);
-      
+
       return ffmpegTarget;
     } catch (e) {
       console.error('Failed to download ffmpeg for macOS:', e);
       throw e;
     }
   }
-  
+
   // Download ffmpeg and ffprobe from yt-dlp's FFmpeg builds (Windows/Linux)
   let url = '';
   if (isWindows) {
@@ -323,14 +323,14 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
   } else if (isLinux) {
     url = 'https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz';
   }
-  
+
   if (!url) {
     throw new Error('Unsupported platform for ffmpeg download');
   }
-  
+
   // For Windows/Linux, download and extract
   const tempFile = path.join(appPath, isWindows ? 'ffmpeg-temp.zip' : 'ffmpeg-temp.tar.xz');
-  
+
   try {
     onStatus?.('ffmpeg をダウンロード中...');
     await downloadFile(url, tempFile, (p, downloaded, total, speed) => {
@@ -340,10 +340,10 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         onProgress?.(-1, downloaded, total, speed);
       }
     });
-    
+
     onStatus?.('ffmpeg を展開中...');
     onProgress?.(85, 0, 0, 0);
-    
+
     if (isWindows) {
       // Extract zip on Windows
       const AdmZip = require('adm-zip');
@@ -382,7 +382,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
           fs.rmSync(path.join(appPath, dir), { recursive: true, force: true });
         }
       }
-      
+
       if (fs.existsSync(ffmpegTarget)) {
         fs.chmodSync(ffmpegTarget, 0o755);
       }
@@ -390,17 +390,17 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
         fs.chmodSync(ffprobeTarget, 0o755);
       }
     }
-    
+
     onProgress?.(95, 0, 0, 0);
     onStatus?.('クリーンアップ中...');
-    
+
     // Clean up temp file
     if (fs.existsSync(tempFile)) {
       fs.unlinkSync(tempFile);
     }
-    
+
     onProgress?.(100, 0, 0, 0);
-    
+
     return ffmpegTarget;
   } catch (e) {
     // Clean up on failure
@@ -419,7 +419,7 @@ const formatProgressDetails = (downloaded: number, total: number, speed: number)
   const mbDownloaded = (downloaded / 1024 / 1024).toFixed(1);
   const mbTotal = (total / 1024 / 1024).toFixed(1);
   const mbSpeed = (speed / 1024 / 1024).toFixed(1);
-  
+
   if (total > 0) {
     return `${mbDownloaded}MB / ${mbTotal}MB (${mbSpeed} MB/s)`;
   } else {
@@ -432,7 +432,7 @@ const createWindow = () => {
     width: 900,
     height: 700,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.mjs'),
+      preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
     },
@@ -545,7 +545,7 @@ ipcMain.handle('check-binaries', async () => {
 ipcMain.handle('get-binary-versions', async () => {
   const ytDlpPath = resolveYtDlpPath();
   const ffmpegPath = resolveFfmpegPath();
-  
+
   let ytDlpVersion = '未検出';
   let ffmpegVersion = '未検出';
 
@@ -666,11 +666,11 @@ ipcMain.handle('download-binaries', async () => {
     binaryDownloadController = new AbortController();
     const [window] = BrowserWindow.getAllWindows();
     let currentStatus = 'yt-dlp をダウンロード中...';
-    
+
     const sendProgress = (percent: number, status: string, downloaded?: number) => {
       window?.webContents.send('binary-update-progress', { type: 'all', percent, status, downloaded });
     };
-    
+
     sendProgress(0, currentStatus);
 
     // 1. Download yt-dlp (0-20%)
@@ -685,7 +685,7 @@ ipcMain.handle('download-binaries', async () => {
         sendProgress(-1, `${currentStatus} ${details}`, downloaded);
       }
     });
-    
+
     sendProgress(20, 'yt-dlp のダウンロード完了');
 
     // 2. Download ffmpeg (20-100%)
@@ -755,7 +755,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   event.reply('download-progress', `🛠 yt-dlp Path: ${ytdlpPath}`);
 
   const outputPath = path.join(payload.location, payload.outputTemplate || '%(title)s.%(ext)s');
-  
+
   const args: string[] = [
     payload.url,
     '-o',
@@ -774,14 +774,14 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   // Advanced options (only for video mode or applicable audio options)
   if (payload.advancedOptions.embedThumbnail) args.push('--embed-thumbnail');
   if (payload.advancedOptions.addMetadata) args.push('--add-metadata');
-  
+
   // Video-only options
   if (payload.options.type === 'video') {
     if (payload.advancedOptions.embedSubs) args.push('--embed-subs');
     if (payload.advancedOptions.writeAutoSub) args.push('--write-auto-sub');
     if (payload.advancedOptions.splitChapters) args.push('--split-chapters');
   }
-  
+
   if (payload.advancedOptions.cookiesBrowser !== 'none') {
     args.push('--cookies-from-browser', payload.advancedOptions.cookiesBrowser);
   }
@@ -790,13 +790,13 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
 
   if (payload.options.type === 'audio') {
     event.reply('download-progress', `🎵 音声形式: ${payload.options.audioFormat.toUpperCase()}`);
-    
+
     args.push(
       '-x',
       '--audio-format',
       payload.options.audioFormat
     );
-    
+
     // WAV uses bit depth instead of bitrate
     if (payload.options.audioFormat === 'wav') {
       event.reply('download-progress', `📊 ビット深度: ${payload.options.audioBitDepth || '16'}bit`);
@@ -810,7 +810,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   } else {
     event.reply('download-progress', `🎬 動画形式: ${payload.options.videoContainer.toUpperCase()}`);
     event.reply('download-progress', `📐 解像度: ${payload.options.videoResolution}`);
-    
+
     if (payload.options.videoResolution !== 'best') {
       const height = payload.options.videoResolution.replace('p', '');
       args.push('-f', `bestvideo[height<=${height}]+bestaudio/best`);
@@ -818,13 +818,13 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
       args.push('-f', 'bestvideo+bestaudio/best');
     }
     args.push('--merge-output-format', payload.options.videoContainer);
-    
+
     // Video conversion options
     if (payload.videoConversion?.enabled) {
       event.reply('download-progress', `🔄 変換オプション: 動画コーデック=${payload.videoConversion.videoCodec}, 音声コーデック=${payload.videoConversion.audioCodec}`);
-      
+
       const postArgs: string[] = [];
-      
+
       if (payload.videoConversion.videoCodec !== 'copy') {
         const codecMap: Record<string, string> = {
           'h264': 'libx264',
@@ -837,7 +837,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
           postArgs.push(`-b:v ${payload.videoConversion.videoBitrate}`);
         }
       }
-      
+
       if (payload.videoConversion.audioCodec !== 'copy') {
         const audioCodecMap: Record<string, string> = {
           'aac': 'aac',
@@ -849,7 +849,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
           postArgs.push(`-b:a ${payload.videoConversion.audioBitrate}`);
         }
       }
-      
+
       if (postArgs.length > 0) {
         args.push('--postprocessor-args', `ffmpeg:${postArgs.join(' ')}`);
       }
@@ -872,18 +872,18 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     activeDownloadProcess.stdout.on('data', (data: Buffer) => {
       const output = data.toString().trim();
       const lines = output.split('\n');
-      
+
       lines.forEach(line => {
         // Extract title and filepath from --print output
         if (!downloadedTitle && line && !line.includes('[') && !line.includes('%')) {
           downloadedTitle = line;
         }
-        if (line && (line.endsWith('.mp4') || line.endsWith('.mkv') || line.endsWith('.webm') || 
-            line.endsWith('.mp3') || line.endsWith('.m4a') || line.endsWith('.flac') || 
-            line.endsWith('.wav') || line.endsWith('.aac'))) {
+        if (line && (line.endsWith('.mp4') || line.endsWith('.mkv') || line.endsWith('.webm') ||
+          line.endsWith('.mp3') || line.endsWith('.m4a') || line.endsWith('.flac') ||
+          line.endsWith('.wav') || line.endsWith('.aac'))) {
           downloadedFilepath = line;
         }
-        
+
         event.reply('download-progress', line);
       });
     });
@@ -905,8 +905,8 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
 
     if (isDownloadCancelled) {
       event.reply('download-progress', '🚫 ダウンロードをキャンセルしました。');
-      event.reply('download-complete', { 
-        success: false, 
+      event.reply('download-complete', {
+        success: false,
         message: 'ダウンロードをキャンセルしました。',
         title: downloadedTitle,
         filename: downloadedFilepath
@@ -923,11 +923,11 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
         // Ignore file stat errors
       }
     }
-    
+
     if (code === 0) {
       event.reply('download-progress', '✅ ダウンロードが完了しました！');
-      event.reply('download-complete', { 
-        success: true, 
+      event.reply('download-complete', {
+        success: true,
         message: 'ダウンロードが完了しました。',
         title: downloadedTitle,
         filename: downloadedFilepath,
@@ -935,8 +935,8 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
       });
     } else {
       event.reply('download-progress', `❌ エラーが発生しました (コード: ${code})`);
-      event.reply('download-complete', { 
-        success: false, 
+      event.reply('download-complete', {
+        success: false,
         message: `エラーが発生しました (コード: ${code})`,
         title: downloadedTitle,
         filename: downloadedFilepath,
@@ -956,11 +956,11 @@ ipcMain.handle('check-app-update', async () => {
 
     const latestVersion = release.tag_name.replace(/^v/, '');
     const currentVersion = app.getVersion();
-    
+
     // Simple string comparison for now, or use semver if needed
     // Assuming versions are like "0.0.1"
     const isUpdateAvailable = latestVersion !== currentVersion;
-    
+
     return {
       available: isUpdateAvailable,
       currentVersion,
@@ -969,10 +969,10 @@ ipcMain.handle('check-app-update', async () => {
     };
   } catch (e) {
     console.error('Failed to check for app updates', e);
-    return { 
-      available: false, 
+    return {
+      available: false,
       currentVersion: app.getVersion(),
-      error: '更新の確認に失敗しました' 
+      error: '更新の確認に失敗しました'
     };
   }
 });
