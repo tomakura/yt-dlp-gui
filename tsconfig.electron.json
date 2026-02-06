@@ -1,0 +1,23 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"module": "ESNext",
+		"moduleResolution": "node",
+		"outDir": "dist-electron",
+		"rootDir": "electron",
+		"noEmit": false,
+		"allowImportingTsExtensions": false,
+		"allowSyntheticDefaultImports": true,
+		"esModuleInterop": true,
+		"strict": false,
+		"types": [
+			"node"
+		]
+	},
+	"include": [
+		"electron/**/*"
+	],
+	"exclude": [
+		"node_modules"
+	]
+}

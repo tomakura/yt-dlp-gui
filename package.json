@@ -11,7 +11,7 @@
     "dev:electron": "cross-env VITE_DEV_SERVER_URL=http://localhost:1420 electron dist-electron/main.js",
     "dev:app": "concurrently -k \"npm run dev\" \"npm run dev:electron\"",
     "build": "npm run build:frontend && electron-builder",
-    "build:frontend": "tsc -b && vite build",
+    "build:frontend": "tsc -p tsconfig.electron.json && tsc -b && vite build",
     "electron:build": "electron-builder",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
