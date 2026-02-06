@@ -61,6 +61,14 @@ npm run electron:build -- --win --arm64
 
 ### すべてをビルド
 
+**推奨方法（一度にビルド）:**
+
+```bash
+npm run build:all
+```
+
+**個別にビルド:**
+
 ```bash
 npm run electron:build -- --mac && \
 npm run electron:build -- --win --x64 && \
