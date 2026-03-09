@@ -400,8 +400,13 @@ function App() {
 			setTotalSize(simpleMatch[2]);
 		}
 
-		// Detect conversion phase
-		if (log.includes('[ExtractAudio]') || log.includes('[Merger]') || log.includes('Destination:')) {
+		// Detect conversion/post-processing phase
+		if (
+			/\[(ExtractAudio|Merger|VideoConvertor|VideoRemuxer|EmbedThumbnail|Metadata(Parser)?|ModifyChapters|Fixup[A-Za-z]+)\]/.test(log) ||
+			log.includes('Postprocessing:') ||
+			log.includes('Deleting original file') ||
+			log.includes('Destination:')
+		) {
 			setProgressStage('converting');
 		}
 
@@ -412,6 +417,78 @@ function App() {
 			// Just indicate activity during conversion
 			setDownloadProgress(prev => Math.min(prev + 0.1, 99));
 		}
+	}, []);
+
+	const appendRuntimeLog = useCallback((rawLog: string) => {
+		const log = rawLog.trim();
+		if (!log) return;
+
+		const isVerboseProgress =
+			log.startsWith('[download]') ||
+			log.includes('Downloading webpage') ||
+			log.includes('Downloading player') ||
+			log.includes('Downloading android ') ||
+			log.includes('Downloading web ') ||
+			log.includes('Downloading m3u8 information') ||
+			log.includes('Extracting URL:') ||
+			log.includes('Formats sorted by:') ||
+			log.includes('Sort order given by extractor:') ||
+			log.includes('Default format spec:') ||
+			log.includes('Downloading 1 format(s):') ||
+			log.includes('Postprocessing:') ||
+			log.includes('time=');
+
+		const isSetupNoise =
+			log.startsWith('🔗 URL:') ||
+			log.startsWith('🛠 yt-dlp Path:') ||
+			log.startsWith('🧠 JS Runtime:') ||
+			log.startsWith('🎵 音声形式:') ||
+			log.startsWith('🎬 動画形式:') ||
+			log.startsWith('📐 解像度:') ||
+			log.startsWith('📊 ビット深度:') ||
+			log.startsWith('📊 ビットレート:') ||
+			log.startsWith('🔄 変換オプション:');
+
+		if (isVerboseProgress || isSetupNoise) {
+			return;
+		}
+
+		const shouldKeep =
+			log.startsWith('⏳') ||
+			log.startsWith('✅') ||
+			log.startsWith('🚫') ||
+			log.startsWith('❌') ||
+			log.includes('ERROR:') ||
+			log.includes('WARNING:') ||
+			log.includes('Unable to') ||
+			log.includes('failed');
+
+		if (!shouldKeep) {
+			return;
+		}
+
+		setLogs(prev => {
+			if (prev[prev.length - 1] === log) {
+				return prev;
+			}
+
+			return [...prev.slice(-49), log];
+		});
+	}, []);
+
+	const missingElectronApiLoggedRef = useRef(false);
+	const getElectronApi = useCallback((options?: { silent?: boolean }) => {
+		const api = window.electron;
+		if (api) {
+			return api;
+		}
+
+		if (!options?.silent && !missingElectronApiLoggedRef.current) {
+			missingElectronApiLoggedRef.current = true;
+			setLogs(prev => [...prev.slice(-49), 'Electron preload API is unavailable.']);
+		}
+
+		return null;
 	}, []);
 
 	// Track the current fetch request to avoid stale results
@@ -440,13 +517,20 @@ function App() {
 			}
 
 			fetchTimeoutRef.current = setTimeout(async () => {
+				const electronApi = getElectronApi();
+				if (!electronApi) {
+					setVideoPreviewLoading(false);
+					setVideoPreviewError('Electron API is unavailable');
+					return;
+				}
+
 				setVideoPreviewLoading(true);
 				setVideoPreviewError(null);
 				setVideoInfo(null);
 				setPlaylistInfo(null);
 
 				try {
-					const result = await window.electron.fetchVideoInfo(urlToFetch);
+					const result = await electronApi.fetchVideoInfo(urlToFetch);
 
 					// Check if this request is still the latest one
 					if (currentRequestId !== fetchRequestIdRef.current) {
@@ -457,9 +541,9 @@ function App() {
 					if (result.error) {
 						setVideoPreviewError(result.error);
 					} else if (result.isPlaylist && result.playlist) {
-						setPlaylistInfo(result.playlist as PlaylistInfo);
+						setPlaylistInfo(result.playlist);
 					} else if (result.video) {
-						setVideoInfo(result.video as VideoInfo);
+						setVideoInfo(result.video);
 					}
 				} catch (err: any) {
 					// Check if this request is still the latest one
@@ -475,7 +559,7 @@ function App() {
 				}
 			}, 500); // Debounce 500ms
 		},
-		[]
+		[getElectronApi]
 	);
 
 	// Trigger video info fetch when URL changes
@@ -490,8 +574,14 @@ function App() {
 	}, [url, binariesExist, fetchVideoInfoDebounced]);
 
 	const checkBinaries = async () => {
+		const electronApi = getElectronApi();
+		if (!electronApi) {
+			setBinariesExist(false);
+			return;
+		}
+
 		try {
-			const result = await window.electron.checkBinaries();
+			const result = await electronApi.checkBinaries();
 			console.log('checkBinaries result:', result);
 			// Assuming result is { ytdlp: boolean, ffmpeg: boolean, path: string }
 			const allExist = result.ytdlp && result.ffmpeg;
@@ -500,14 +590,14 @@ function App() {
 			if (allExist) {
 				setIsBinaryVersionLoading(true);
 				try {
-					const versions = await window.electron.getBinaryVersions();
+					const versions = await electronApi.getBinaryVersions();
 					setBinaryVersions(versions);
 				} finally {
 					setIsBinaryVersionLoading(false);
 				}
 
 				// Fetch latest versions in background
-				window.electron.getLatestBinaryVersions().then(latest => {
+				electronApi.getLatestBinaryVersions().then(latest => {
 					setLatestBinaryVersions(latest);
 				}).catch(err => console.error('Failed to fetch latest versions', err));
 			}
@@ -515,19 +605,19 @@ function App() {
 			if (!allExist) {
 				setLogs(prev => [...prev, 'Error: yt-dlp or ffmpeg binaries not found.']);
 				try {
-					const migration = await window.electron.migrateLegacyBinaries();
+					const migration = await electronApi.migrateLegacyBinaries();
 					if (migration?.migrated) {
 						setLogs(prev => [
 							...prev,
 							`Migrated legacy binaries: ${migration.copied.join(', ')}`
 						]);
-						const recheck = await window.electron.checkBinaries();
+						const recheck = await electronApi.checkBinaries();
 						const allExistAfter = recheck.ytdlp && recheck.ffmpeg;
 						setBinariesExist(allExistAfter);
 						if (allExistAfter) {
 							setIsBinaryVersionLoading(true);
 							try {
-								const versions = await window.electron.getBinaryVersions();
+								const versions = await electronApi.getBinaryVersions();
 								setBinaryVersions(versions);
 							} finally {
 								setIsBinaryVersionLoading(false);
@@ -552,7 +642,9 @@ function App() {
 		const checkUpdates = async () => {
 			// 1. Check App Update
 			try {
-				const update = await window.electron.checkAppUpdate();
+				const electronApi = getElectronApi({ silent: true });
+				if (!electronApi) return;
+				const update = await electronApi.checkAppUpdate();
 				if (update && update.available) {
 					const version = update.latestVersion || 'latest';
 					setLogs(prev => [...prev, t('newVersionAvailable').replace('{version}', version)]);
@@ -563,7 +655,7 @@ function App() {
 		};
 
 		checkUpdates();
-	}, [t]);
+	}, [getElectronApi, t]);
 
 	// Effect to trigger binary update if auto-update is enabled and updates are available
 	useEffect(() => {
@@ -601,37 +693,48 @@ function App() {
 
 		// Set default download location if not already set
 		if (!location) {
-			window.electron.getDefaultDownloadPath().then(defaultPath => {
+			const electronApi = getElectronApi({ silent: true });
+			electronApi?.getDefaultDownloadPath().then(defaultPath => {
 				setLocation(defaultPath);
 				localStorage.setItem('lastLocation', defaultPath);
 			}).catch(err => console.error('Failed to get default download path', err));
 		}
 
 		checkBinaries();
-	}, []);
+	}, [getElectronApi]);
 
 	// Separate effect for download listeners to avoid stale closures
 	useEffect(() => {
-		const removeDownloadListeners = window.electron.onDownloadProgress((progress) => {
-			setLogs(prev => [...prev, progress]);
+		const electronApi = getElectronApi({ silent: true });
+		if (!electronApi?.onDownloadProgress) {
+			return;
+		}
+
+		const removeDownloadListeners = electronApi.onDownloadProgress((progress) => {
 			parseProgress(progress);
+			appendRuntimeLog(progress);
 		});
 
 		return () => {
 			removeDownloadListeners();
 		};
-	}, [parseProgress]);
+	}, [appendRuntimeLog, getElectronApi, parseProgress]);
 
 	// Effect for binary update progress
 	useEffect(() => {
-		const removeBinaryProgressListener = window.electron.onBinaryUpdateProgress((progress) => {
+		const electronApi = getElectronApi({ silent: true });
+		if (!electronApi?.onBinaryUpdateProgress) {
+			return;
+		}
+
+		const removeBinaryProgressListener = electronApi.onBinaryUpdateProgress((progress) => {
 			setBinaryUpdateProgress(progress);
 		});
 
 		return () => {
 			removeBinaryProgressListener();
 		};
-	}, []);
+	}, [getElectronApi]);
 
 	// Refs to hold current values for download complete callback
 	const currentDownloadUrlRef = React.useRef(currentDownloadUrl);
@@ -647,7 +750,12 @@ function App() {
 
 	// Effect for download complete - only register once
 	useEffect(() => {
-		const removeCompleteListeners = window.electron.onDownloadComplete((result: DownloadResult) => {
+		const electronApi = getElectronApi({ silent: true });
+		if (!electronApi?.onDownloadComplete) {
+			return;
+		}
+
+		const removeCompleteListeners = electronApi.onDownloadComplete((result: DownloadResult) => {
 			setIsDownloading(false);
 
 			if (result.message.toLowerCase().includes('cancel')) {
@@ -679,7 +787,7 @@ function App() {
 		return () => {
 			removeCompleteListeners();
 		};
-	}, []); // Empty dependency array - register only once
+	}, [getElectronApi]); // Register once per API availability
 
 	// Save settings when changed
 	useEffect(() => {
@@ -748,8 +856,11 @@ function App() {
 	};
 
 	const handleCancelVideoDownload = async () => {
+		const electronApi = getElectronApi();
+		if (!electronApi) return;
+
 		if (isDownloading) {
-			await window.electron.cancelDownload();
+			await electronApi.cancelDownload();
 			// Status update will be handled by onDownloadComplete event
 		}
 	};
@@ -757,6 +868,9 @@ function App() {
 
 	// Refactor handleDownload to accept URL override
 	const startDownloadProcess = useCallback((targetUrl: string, subfolder?: string) => {
+		const electronApi = getElectronApi();
+		if (!electronApi) return;
+
 		if (!targetUrl) return;
 		if (!location) {
 			alert(t('selectDestination'));
@@ -793,7 +907,7 @@ function App() {
 			finalOutputTemplate = '%(playlist_title)s/' + finalOutputTemplate;
 		}
 
-		window.electron.startDownload({
+		electronApi.startDownload({
 			url: targetUrl,
 			format: formatOptions.type,
 			location,
@@ -804,7 +918,7 @@ function App() {
 			outputTemplate: finalOutputTemplate,
 			notificationsEnabled
 		});
-	}, [location, formatOptions, advancedOptions, outputTemplate, notificationsEnabled, t, playlistInfo]);
+	}, [advancedOptions, formatOptions, getElectronApi, location, notificationsEnabled, outputTemplate, playlistInfo, t]);
 
 	// Update original handleDownload to use the new function
 	const handleDownload = useCallback(() => {
@@ -854,8 +968,11 @@ function App() {
 	}, [isDownloading, downloadQueue, startDownloadProcess, t]);
 
 	const handleBatchImport = async () => {
+		const electronApi = getElectronApi();
+		if (!electronApi) return;
+
 		try {
-			const result = await window.electron.openFileDialog();
+			const result = await electronApi.openFileDialog();
 			if (result && result.content) {
 				const urls = result.content.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
 
@@ -892,14 +1009,18 @@ function App() {
 	}, [isDownloading, url, location, binariesExist, isSettingsOpen, handleDownload]);
 
 	const handleUpdateBinaries = async () => {
+		const electronApi = getElectronApi();
+		if (!electronApi) return;
+
 		setIsUpdatingBinaries(true);
 		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, statusKey: 'startingYtDlpUpdate' });
 		setBinaryStatus(null);
 		setLogs(prev => [...prev, t('startingYtDlpUpdate')]);
-		const result = await window.electron.updateYtDlp();
+		const result = await electronApi.updateYtDlp();
 		setIsUpdatingBinaries(false);
 		setBinaryUpdateProgress(null);
 		if (result === true) {
+			await checkBinaries();
 			setBinaryStatus({ message: t('updateComplete'), type: 'success' });
 			setLogs(prev => [...prev, t('ytDlpUpdateComplete')]);
 		} else if (result === 'cancelled') {
@@ -912,14 +1033,18 @@ function App() {
 	};
 
 	const handleUpdateFfmpeg = async () => {
+		const electronApi = getElectronApi();
+		if (!electronApi) return;
+
 		setIsUpdatingBinaries(true);
 		setBinaryUpdateProgress({ type: 'ffmpeg', percent: 0, statusKey: 'startingFfmpegUpdate' });
 		setBinaryStatus(null);
 		setLogs(prev => [...prev, t('startingFfmpegUpdate')]);
-		const result = await window.electron.updateFfmpeg();
+		const result = await electronApi.updateFfmpeg();
 		setIsUpdatingBinaries(false);
 		setBinaryUpdateProgress(null);
 		if (result === true) {
+			await checkBinaries();
 			setBinaryStatus({ message: t('updateComplete'), type: 'success' });
 			setLogs(prev => [...prev, t('ffmpegUpdateComplete')]);
 		} else if (result === 'cancelled') {
@@ -932,21 +1057,30 @@ function App() {
 	};
 
 	const handleCancelDownload = async () => {
-		await window.electron.cancelBinaryDownload();
+		const electronApi = getElectronApi();
+		if (!electronApi) return;
+
+		await electronApi.cancelBinaryDownload();
 	};
 
 	const handleDownloadBinaries = async () => {
+		const electronApi = getElectronApi();
+		if (!electronApi) return;
+
 		setIsUpdatingBinaries(true);
 		setBinaryUpdateProgress({ type: 'ytdlp', percent: 0, statusKey: 'startingBinaryDownload' });
 		setBinaryStatus(null);
 		setLogs(prev => [...prev, t('startingBinaryDownload')]);
-		const success = await window.electron.downloadBinaries();
+		const result = await electronApi.downloadBinaries();
 		setIsUpdatingBinaries(false);
 		setBinaryUpdateProgress(null);
-		if (success) {
+		if (result === true) {
 			setBinaryStatus({ message: t('downloadComplete2'), type: 'success' });
 			setLogs(prev => [...prev, t('binaryDownloadComplete')]);
-			checkBinaries(); // Re-check status
+			await checkBinaries();
+		} else if (result === 'cancelled') {
+			setBinaryStatus({ message: t('updateCancelled'), type: 'info' });
+			setLogs(prev => [...prev, t('downloadCancelled')]);
 		} else {
 			setBinaryStatus({ message: t('downloadFailed'), type: 'error' });
 			setLogs(prev => [...prev, t('binaryDownloadFailed')]);

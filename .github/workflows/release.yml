@@ -7,45 +7,38 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish-tauri:
+  publish-electron:
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
-            args: '--target universal-apple-darwin'
-          - platform: 'windows-latest'
-            args: '--target x86_64-pc-windows-msvc'
-          - platform: 'windows-latest'
-            args: '--target aarch64-pc-windows-msvc'
+          - os: macos-latest
+            build_cmd: npm run build:mac -- --publish always
+          - os: windows-latest
+            build_cmd: npm run build:win:x64 -- --publish always
+          - os: windows-latest
+            build_cmd: npm run build:win:arm64 -- --publish always
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: setup node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: npm
 
-      - name: install rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.platform == 'windows-latest' && 'x86_64-pc-windows-msvc,aarch64-pc-windows-msvc' || '' }}
+      - name: Install dependencies
+        run: npm ci
 
-      - name: install dependencies (npm)
-        run: npm install
+      - name: Build frontend and Electron sources
+        run: npm run build:frontend
 
-      - name: Build and Release
-        uses: tauri-apps/tauri-action@v0.5
+      - name: Build and publish release artifacts
+        run: ${{ matrix.build_cmd }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: v__VERSION__
-          releaseName: 'yt-dlp GUI v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

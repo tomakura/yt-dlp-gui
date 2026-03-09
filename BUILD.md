@@ -1,152 +1,120 @@
-# ビルドガイド / Build Guide
+# Build Guide
 
-## 必要な環境 / Prerequisites
+## Prerequisites
 
-- **Node.js**: 18.x 以上
-- **npm**: 9.x 以上
-- **OS**: macOS（Mac/Windows両方のビルドが可能）
+- Node.js 18+
+- npm 9+
+- macOS for local mac builds
+- Windows for native Windows verification when needed
 
-## 依存関係のインストール / Install Dependencies
+## Install
 
 ```bash
 npm install
 ```
 
-## 開発モード / Development Mode
+## Development
+
+Frontend only:
 
 ```bash
 npm run dev
 ```
 
-開発サーバーが起動し、ホットリロードが有効になります。
-
-Electron で起動する場合は別ターミナルで以下を実行:
+Electron app with Vite dev server:
 
 ```bash
-npm run dev:electron
+npm run dev:app
 ```
 
-## ビルドコマンド / Build Commands
+This compiles the Electron entrypoints first, then starts Vite and Electron together.
 
-### Mac版（Universal Binary）
+## Build commands
+
+Compile Electron entrypoints only:
 
 ```bash
-npm run electron:build -- --mac
+npm run build:electron
 ```
 
-出力: `release/yt-dlp GUI-<version>-universal.dmg`
-
-- Intel Mac と Apple Silicon Mac の両方で動作
-- コード署名なしでビルド
-
-### Windows版（x64）
+Build frontend + Electron entrypoints:
 
 ```bash
-npm run electron:build -- --win --x64
+npm run build:frontend
 ```
 
-出力: `release/yt-dlp GUI Setup <version>-x64.exe`
-
-- 一般的な64ビットWindowsマシン向け
-
-### Windows版（ARM64）
+Build macOS DMG:
 
 ```bash
-npm run electron:build -- --win --arm64
+npm run build:mac
 ```
 
-出力: `release/yt-dlp GUI Setup <version>-arm64.exe`
+Build Windows x64 installer:
 
-- Surface Pro X、Snapdragon搭載PC向け
+```bash
+npm run build:win:x64
+```
 
-### すべてをビルド
+Build Windows ARM64 installer:
 
-**推奨方法（一度にビルド）:**
+```bash
+npm run build:win:arm64
+```
+
+Build all supported release targets:
 
 ```bash
 npm run build:all
 ```
 
-**個別にビルド:**
+## Release artifacts
+
+Configured artifact names:
+
+- macOS: `release/yt-dlp-GUI-<version>-universal.dmg`
+- Windows x64: `release/yt-dlp-GUI-Setup-<version>-x64.exe`
+- Windows ARM64: `release/yt-dlp-GUI-Setup-<version>-arm64.exe`
+
+## Binary management
+
+The app manages `yt-dlp`, `ffmpeg`, and `ffprobe` separately from the frontend bundle.
+
+- In development, binaries are stored under the repo-local `Application/` directory.
+- In packaged builds, binaries are stored under the app's `Application/` resources directory.
+- Legacy binaries under `userData/bin` are migrated on startup when possible.
+- Initial download and later updates are performed from the app settings UI.
+
+On macOS, `yt-dlp` is downloaded as `yt-dlp_macos`. The app also prefers a bundled JS runtime for YouTube extraction so packaged builds do not rely on an external `node` installation.
+
+## Release automation
+
+GitHub release automation is handled by `.github/workflows/release.yml`.
+
+- Tag pushes matching `v*` trigger matrix builds.
+- The workflow runs `npm ci`, `npm run build:frontend`, then publishes Electron Builder artifacts with `GH_TOKEN`.
+
+## Tech stack
+
+- Electron 33.x
+- React 18.3.x
+- TypeScript 5.x
+- Vite 5.x
+- Tailwind CSS 3.x
+- electron-builder 25.x
+
+## Troubleshooting
+
+Clear build outputs:
 
 ```bash
-npm run electron:build -- --mac && \
-npm run electron:build -- --win --x64 && \
-npm run electron:build -- --win --arm64
+rm -rf dist dist-electron release
 ```
 
-## ビルド成果物 / Build Artifacts
-
-ビルド完了後、`release/` ディレクトリに以下が生成されます：
-
-| ファイル | 対象プラットフォーム | サイズ目安 |
-|---------|---------------------|-----------|
-| `yt-dlp GUI-1.0.0-universal.dmg` | macOS (Intel/Apple Silicon) | ~200MB |
-| `yt-dlp GUI Setup 1.0.0-x64.exe` | Windows x64 | ~100MB |
-| `yt-dlp GUI Setup 1.0.0-arm64.exe` | Windows ARM64 | ~105MB |
-
-## バイナリ管理について / Binary Management
-
-このアプリは **yt-dlp** と **ffmpeg** を必要としますが、これらはアプリにバンドルされていません。
-
-- 初回起動時に自動的にダウンロードされます
-- 保存場所:
-  - **macOS**: `~/Library/Application Support/yt-dlp-gui/bin/`
-  - **Windows**: `%APPDATA%/yt-dlp-gui/bin/`
-- 設定画面からいつでも再ダウンロード/更新可能
-
-### ダウンロードされるバイナリ
-
-| バイナリ | macOS | Windows |
-|---------|-------|---------|
-| yt-dlp | [yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp) の `yt-dlp_macos` | `yt-dlp.exe` |
-| ffmpeg | [ffbinaries](https://ffbinaries.com/) | [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds) |
-
-## コード署名 / Code Signing
-
-現在、コード署名は設定されていません。
-
-### macOS
-
-未署名のアプリを実行するには:
-1. `.dmg` をマウント
-2. アプリを右クリック → 「開く」を選択
-3. 警告ダイアログで「開く」をクリック
-
-または、ターミナルで:
-```bash
-xattr -cr "/Applications/yt-dlp GUI.app"
-```
-
-### Windows
-
-SmartScreenの警告が表示される場合があります。「詳細情報」→「実行」で起動できます。
-
-## 技術スタック / Tech Stack
-
-- **Electron**: 33.x
-- **React**: 19.x
-- **TypeScript**: 5.x
-- **Vite**: 5.x
-- **Tailwind CSS**: 3.x
-- **electron-builder**: 25.x
-
-## トラブルシューティング / Troubleshooting
-
-### ビルドエラー: native dependency
+Reinstall dependencies:
 
 ```bash
-npm rebuild
-```
-
-### キャッシュクリア
-
-```bash
-rm -rf node_modules dist dist-electron release
+rm -rf node_modules
 npm install
 ```
 
-### Windows ARM64ビルドが失敗する
-
-macOSからのクロスコンパイルでは稀に問題が発生することがあります。
-その場合は Windows ARM64 マシンで直接ビルドしてください。
+If packaged downloads fail after an old install, remove stale binaries from the app-managed `Application/` directory and download them again from settings.

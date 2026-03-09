@@ -45,15 +45,18 @@ export interface VideoInfoResult {
     uploadDate?: string;
     description?: string;
     filesize?: number;
+    bestResolution?: string;
     formats?: {
       format_id: string;
       ext: string;
       resolution?: string;
+      height?: number;
       filesize?: number;
       filesize_approx?: number;
       vcodec?: string;
       acodec?: string;
       tbr?: number;
+      abr?: number;
     }[];
   };
   playlist?: {
@@ -70,6 +73,7 @@ export interface VideoInfoResult {
       duration: number;
       viewCount?: number;
       filesize?: number;
+      bestResolution?: string;
     }[];
   };
   error?: string;
@@ -96,10 +100,10 @@ declare global {
       onBinaryUpdateProgress: (callback: (data: BinaryUpdateProgress | null) => void) => () => void;
       updateYtDlp: () => Promise<boolean | 'cancelled'>;
       updateFfmpeg: () => Promise<boolean | 'cancelled'>;
-      cancelBinaryDownload: () => Promise<void>;
+      cancelBinaryDownload: () => Promise<boolean>;
       checkAppUpdate: () => Promise<{ available: boolean; currentVersion: string; latestVersion?: string; url?: string; error?: string }>;
       openExternal: (url: string) => Promise<void>;
-      downloadBinaries: () => Promise<boolean>;
+      downloadBinaries: () => Promise<boolean | 'cancelled'>;
       openFolder: (folderPath: string) => void;
       fetchVideoInfo: (url: string) => Promise<VideoInfoResult>;
       detectHwEncoders: () => Promise<HwEncoderResult>;
