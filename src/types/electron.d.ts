@@ -16,6 +16,7 @@ declare global {
       selectDirectory: () => Promise<string | null>;
       openFileDialog: () => Promise<{ content: string; filePath: string } | null>;
       getDefaultDownloadPath: () => Promise<string>;
+      getAppVersion: () => Promise<string>;
       checkBinaries: () => Promise<BinaryPresence>;
       migrateLegacyBinaries: () => Promise<{ migrated: boolean; copied: string[]; sources: string[]; skipped?: string; error?: string }>;
       getBinaryVersions: () => Promise<InstalledBinaryVersions>;

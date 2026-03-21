@@ -37,6 +37,19 @@ interface SettingsModalProps {
 
 type Tab = 'general' | 'appearance' | 'binaries' | 'presets' | 'info';
 
+const normalizeComparableVersion = (value: string | null | undefined) => {
+	if (!value) return null;
+	const trimmed = value.trim().replace(/^v/i, '');
+	const numeric = trimmed.match(/\d+(?:\.\d+)+/);
+	return numeric ? numeric[0] : trimmed;
+};
+
+const versionsMatch = (a: string | null | undefined, b: string | null | undefined) => {
+	const normalizedA = normalizeComparableVersion(a);
+	const normalizedB = normalizeComparableVersion(b);
+	return !!normalizedA && !!normalizedB && normalizedA === normalizedB;
+};
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
 	isOpen,
 	onClose,
@@ -67,6 +80,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	const { t, language, setLanguage } = useI18n();
 	const [activeTab, setActiveTab] = useState<Tab>('general');
 	const [newPresetName, setNewPresetName] = useState('');
+	const [appVersion, setAppVersion] = useState('...');
 	const [appUpdateStatus, setAppUpdateStatus] = useState<{
 		checking: boolean;
 		available: boolean | null;
@@ -138,8 +152,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 		: t('notDetected');
 	const ytDlpLatestKnown = !!latestBinaryVersions?.ytDlp.latestKnown && !!latestBinaryVersions?.ytDlp.version;
 	const ffmpegLatestKnown = !!latestBinaryVersions?.ffmpeg.latestKnown && !!latestBinaryVersions?.ffmpeg.version;
-	const ytDlpUpToDate = ytDlpLatestKnown && binaryVersions?.ytDlp.version === latestBinaryVersions?.ytDlp.version;
-	const ffmpegUpToDate = ffmpegLatestKnown && binaryVersions?.ffmpeg.version === latestBinaryVersions?.ffmpeg.version;
+	const ytDlpUpToDate = ytDlpLatestKnown && versionsMatch(binaryVersions?.ytDlp.version, latestBinaryVersions?.ytDlp.version);
+	const ffmpegUpToDate = ffmpegLatestKnown && versionsMatch(binaryVersions?.ffmpeg.version, latestBinaryVersions?.ffmpeg.version);
 
 	// Handle ESC key to close modal
 	useEffect(() => {
@@ -168,6 +182,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 			}, 300);
 			return () => clearTimeout(timer);
 		}
+	}, [isOpen]);
+
+	useEffect(() => {
+		if (!isOpen) return;
+
+		window.electron.getAppVersion()
+			.then(setAppVersion)
+			.catch((error) => {
+				console.error('Failed to get app version', error);
+				setAppVersion('unknown');
+			});
 	}, [isOpen]);
 
 	const handleSave = () => {
@@ -638,7 +663,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 													</div>
 													<div>
 														<h4 className="text-xl font-bold text-white">yt-dlp-gui</h4>
-														<p className="text-sm text-gray-400">Version 1.3.1</p>
+														<p className="text-sm text-gray-400">Version {appVersion}</p>
 													</div>
 												</div>
 

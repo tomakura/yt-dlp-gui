@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electron', {
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   getDefaultDownloadPath: () => ipcRenderer.invoke('get-default-download-path'),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
   checkBinaries: (): Promise<BinaryPresence> => ipcRenderer.invoke('check-binaries'),
   migrateLegacyBinaries: () => ipcRenderer.invoke('migrate-legacy-binaries'),
   getBinaryVersions: (): Promise<InstalledBinaryVersions> => ipcRenderer.invoke('get-binary-versions'),

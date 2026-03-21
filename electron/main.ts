@@ -550,9 +550,27 @@ const isLikelyPlaylistUrl = (value: string) => {
 };
 
 const getBestResolutionLabel = (html: string) => {
-  const match = html.match(/"height":"?(\d{3,4})"?/);
-  if (!match) return undefined;
-  return toResolutionLabel(Number(match[1]));
+  const heights = new Set<number>();
+
+  for (const match of html.matchAll(/"height":"?(\d{3,4})"?/g)) {
+    const height = Number(match[1]);
+    if (Number.isFinite(height)) {
+      heights.add(height);
+    }
+  }
+
+  for (const match of html.matchAll(/"qualityLabel":"(\d{3,4})p"/g)) {
+    const height = Number(match[1]);
+    if (Number.isFinite(height)) {
+      heights.add(height);
+    }
+  }
+
+  if (heights.size === 0) {
+    return undefined;
+  }
+
+  return toResolutionLabel(Math.max(...heights));
 };
 
 const buildVideoInfo = (partial: Partial<VideoInfo> & Pick<VideoInfo, 'id' | 'title' | 'channel'>): VideoInfo => ({
@@ -1094,6 +1112,56 @@ const extractFfmpegZip = async (zipPath: string, targetDir: string) => {
   }
 };
 
+const removeIfExists = async (targetPath: string) => {
+  if (!fs.existsSync(targetPath)) {
+    return;
+  }
+
+  await fs.promises.rm(targetPath, { recursive: true, force: true });
+};
+
+const installStagedFfmpegBinaries = async (
+  stagedFfmpegPath: string,
+  stagedFfprobePath: string,
+  ffmpegTarget: string,
+  ffprobeTarget: string
+) => {
+  const ffmpegBackup = `${ffmpegTarget}.bak`;
+  const ffprobeBackup = `${ffprobeTarget}.bak`;
+
+  await removeIfExists(ffmpegBackup);
+  await removeIfExists(ffprobeBackup);
+
+  const hadFfmpeg = fs.existsSync(ffmpegTarget);
+  const hadFfprobe = fs.existsSync(ffprobeTarget);
+
+  if (hadFfmpeg) {
+    await fs.promises.rename(ffmpegTarget, ffmpegBackup);
+  }
+  if (hadFfprobe) {
+    await fs.promises.rename(ffprobeTarget, ffprobeBackup);
+  }
+
+  try {
+    await fs.promises.rename(stagedFfmpegPath, ffmpegTarget);
+    await fs.promises.rename(stagedFfprobePath, ffprobeTarget);
+    await removeIfExists(ffmpegBackup);
+    await removeIfExists(ffprobeBackup);
+  } catch (error) {
+    await removeIfExists(ffmpegTarget);
+    await removeIfExists(ffprobeTarget);
+
+    if (fs.existsSync(ffmpegBackup)) {
+      await fs.promises.rename(ffmpegBackup, ffmpegTarget);
+    }
+    if (fs.existsSync(ffprobeBackup)) {
+      await fs.promises.rename(ffprobeBackup, ffprobeTarget);
+    }
+
+    throw error;
+  }
+};
+
 const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number, total: number, speed: number) => void, onStatus?: (status: string) => void) => {
   const appPath = getManagedBinaryDir();
   const ffmpegTarget = path.join(appPath, isWindows ? 'ffmpeg.exe' : 'ffmpeg');
@@ -1105,8 +1173,14 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
 
   const url = `https://github.com/Tyrrrz/FFmpegBin/releases/latest/download/${assetName}`;
   const tempFile = path.join(appPath, 'ffmpeg-temp.zip');
+  const stagingDir = path.join(appPath, `ffmpeg-stage-${Date.now()}`);
+  const stagedFfmpegPath = path.join(stagingDir, isWindows ? 'ffmpeg.exe' : 'ffmpeg');
+  const stagedFfprobePath = path.join(stagingDir, isWindows ? 'ffprobe.exe' : 'ffprobe');
 
   try {
+    await removeIfExists(stagingDir);
+    await fs.promises.mkdir(stagingDir, { recursive: true });
+
     onStatus?.(`ffmpeg をダウンロード中 (${assetName})...`);
     await downloadFile(url, tempFile, (p, downloaded, total, speed) => {
       if (p >= 0) {
@@ -1119,20 +1193,22 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
     onStatus?.('ffmpeg/ffprobe を展開中...');
     onProgress?.(85, 0, 0, 0);
 
-    await extractFfmpegZip(tempFile, appPath);
+    await extractFfmpegZip(tempFile, stagingDir);
 
-    if (!fs.existsSync(ffmpegTarget) || !fs.existsSync(ffprobeTarget)) {
+    if (!fs.existsSync(stagedFfmpegPath) || !fs.existsSync(stagedFfprobePath)) {
       throw new Error(`FFmpegBin archive did not contain expected binaries for ${process.platform}/${process.arch}`);
     }
 
     if (process.platform === 'darwin') {
       try {
-        await execAsync(`xattr -d com.apple.quarantine "${ffmpegTarget}"`);
+        await execAsync(`xattr -d com.apple.quarantine "${stagedFfmpegPath}"`);
       } catch { }
       try {
-        await execAsync(`xattr -d com.apple.quarantine "${ffprobeTarget}"`);
+        await execAsync(`xattr -d com.apple.quarantine "${stagedFfprobePath}"`);
       } catch { }
     }
+
+    await installStagedFfmpegBinaries(stagedFfmpegPath, stagedFfprobePath, ffmpegTarget, ffprobeTarget);
 
     onProgress?.(95, 0, 0, 0);
     onStatus?.('クリーンアップ中...');
@@ -1141,6 +1217,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
     if (fs.existsSync(tempFile)) {
       fs.unlinkSync(tempFile);
     }
+    await removeIfExists(stagingDir);
 
     onProgress?.(100, 0, 0, 0);
 
@@ -1150,6 +1227,7 @@ const downloadFfmpeg = async (onProgress?: (percent: number, downloaded: number,
     if (fs.existsSync(tempFile)) {
       fs.unlinkSync(tempFile);
     }
+    await removeIfExists(stagingDir);
     throw e;
   }
 };
@@ -1191,7 +1269,7 @@ const createWindow = () => {
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 };
 
@@ -1240,6 +1318,10 @@ ipcMain.handle('open-file-dialog', async () => {
 
 ipcMain.handle('get-default-download-path', () => {
   return app.getPath('downloads');
+});
+
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
 });
 
 ipcMain.handle('migrate-legacy-binaries', async () => {
@@ -1652,7 +1734,20 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   }
 
   // Advanced options (only for video mode or applicable audio options)
-  if (payload.advancedOptions.embedThumbnail) args.push('--embed-thumbnail');
+  if (payload.advancedOptions.embedThumbnail) {
+    const shouldSkipThumbnailEmbed =
+      payload.options.type === 'audio' &&
+      payload.options.audioFormat === 'wav';
+
+    if (shouldSkipThumbnailEmbed) {
+      event.reply('download-progress', '⚠️ WAV ではサムネイル埋め込みをスキップします。');
+    } else if (payload.options.type === 'audio') {
+      args.push('--convert-thumbnails', 'jpg');
+      args.push('--embed-thumbnail');
+    } else {
+      args.push('--embed-thumbnail');
+    }
+  }
   if (payload.advancedOptions.addMetadata) args.push('--add-metadata');
 
   // Video-only options

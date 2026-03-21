@@ -121,6 +121,18 @@ const safeParseLocalStorage = <T,>(key: string, fallback: T): T => {
 };
 
 const isValidTimecode = (value: string) => /^\d{2}:\d{2}:\d{2}$/.test(value);
+const normalizeComparableVersion = (value: string | null | undefined) => {
+	if (!value) return null;
+	const trimmed = value.trim().replace(/^v/i, '');
+	const numeric = trimmed.match(/\d+(?:\.\d+)+/);
+	return numeric ? numeric[0] : trimmed;
+};
+
+const versionsMatch = (a: string | null | undefined, b: string | null | undefined) => {
+	const normalizedA = normalizeComparableVersion(a);
+	const normalizedB = normalizeComparableVersion(b);
+	return !!normalizedA && !!normalizedB && normalizedA === normalizedB;
+};
 
 function App() {
 	const { t } = useI18n();
@@ -693,12 +705,12 @@ function App() {
 			const shouldUpdateYtDlp =
 				latestBinaryVersions.ytDlp.latestKnown &&
 				!!latestBinaryVersions.ytDlp.version &&
-				binaryVersions.ytDlp.version !== latestBinaryVersions.ytDlp.version;
+				!versionsMatch(binaryVersions.ytDlp.version, latestBinaryVersions.ytDlp.version);
 
 			const shouldUpdateFfmpeg =
 				latestBinaryVersions.ffmpeg.latestKnown &&
 				!!latestBinaryVersions.ffmpeg.version &&
-				binaryVersions.ffmpeg.version !== latestBinaryVersions.ffmpeg.version;
+				!versionsMatch(binaryVersions.ffmpeg.version, latestBinaryVersions.ffmpeg.version);
 
 			if (shouldUpdateYtDlp && !isUpdatingBinaries) {
 				handleUpdateBinaries();
