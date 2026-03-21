@@ -25,16 +25,24 @@
 
 モダンで使いやすい `yt-dlp` のクロスプラットフォーム GUI フロントエンドです。
 
+### 最新リリース: v1.3.3
+
+- プレビュー取得を高速化し、必要な場合だけ `yt-dlp` にフォールバックするようにしました。
+- `timeout` / 認証要求 / レート制限などのエラーを区別して表示するようにしました。
+- `ffmpeg` の配布元を見直し、macOS Apple Silicon を含む自動導入を安定化しました。
+
+詳細は [ChangeLogs/v1.3.3.md](./ChangeLogs/v1.3.3.md) を参照してください。
+
 ## ✨ 主な機能
 
 *   **モダンなユーザーインターフェース**: 直感的で美しいデザイン
 *   **多言語対応**: 日本語・英語
-*   **動画情報プレビュー**: URLを入力するとサムネイル・タイトル・チャンネル名・最高画質を表示
+*   **高速な動画情報プレビュー**: URLを入力すると、軽量取得を優先しつつ必要時のみ `yt-dlp` にフォールバックしてサムネイル・タイトル・チャンネル名などを表示
 *   **プレイリスト対応**: ギャラリー風ナビゲーションで複数動画をまとめてダウンロード
 *   **動画ダウンロード**: MP4, WebM, MKV / 解像度: 4K〜360p
 *   **音声ダウンロード**: MP3, M4A, AAC, WAV, FLAC
-*   **高度なオプション**: サムネイル埋め込み、メタデータ追加、字幕埋め込み、チャプター分割、ブラウザCookie連携
-*   **便利な機能**: クリップボード監視、ダウンロード履歴、プリセット、お気に入りフォルダ
+*   **高度なオプション**: サムネイル埋め込み、メタデータ追加、字幕埋め込み、チャプター分割、時間範囲指定、ブラウザCookie連携
+*   **便利な機能**: クリップボード監視、ダウンロード履歴、プリセット、お気に入りフォルダ、通知
 
 ## 📦 インストール
 
@@ -78,7 +86,7 @@
 2. **バイナリ** タブを選択
 3. `yt-dlp` と `ffmpeg` の **ダウンロード** ボタンをクリック
 
-> ⚠️ バイナリをダウンロードしないと動画のダウンロードができません
+> ⚠️ 動画情報プレビューは一部URLでバイナリなしでも動作しますが、実際のダウンロードには `yt-dlp` と `ffmpeg/ffprobe` が必要です
 
 ### 3. バイナリの更新
 
@@ -113,16 +121,24 @@ yt-dlp・ffmpegは、以下の手順で更新できます。
 
 A modern and user-friendly cross-platform GUI frontend for `yt-dlp`.
 
+### Latest Release: v1.3.3
+
+- Faster preview fetching with `yt-dlp` used only as a fallback when needed.
+- Better error reporting for timeout, authentication-required, and rate-limited cases.
+- More reliable automatic `ffmpeg` installation, including macOS Apple Silicon.
+
+See [ChangeLogs/v1.3.3.md](./ChangeLogs/v1.3.3.md) for details.
+
 ## ✨ Features
 
 *   **Modern UI**: Intuitive and beautiful design
 *   **Multi-language**: Japanese and English
-*   **Video Info Preview**: Shows thumbnail, title, channel, and best quality when URL is entered
+*   **Fast Video Info Preview**: Uses lightweight fetchers first and falls back to `yt-dlp` only when needed to show thumbnails, title, channel, and related metadata
 *   **Playlist Support**: Gallery navigation for downloading multiple videos
 *   **Video Download**: MP4, WebM, MKV / Resolution: 4K to 360p
 *   **Audio Download**: MP3, M4A, AAC, WAV, FLAC
-*   **Advanced Options**: Embed thumbnails, metadata, subtitles, chapter splitting, browser cookies
-*   **Convenience**: Clipboard monitoring, download history, presets, favorite folders
+*   **Advanced Options**: Embed thumbnails, metadata, subtitles, chapter splitting, time-range downloads, browser cookies
+*   **Convenience**: Clipboard monitoring, download history, presets, favorite folders, notifications
 
 ## 📦 Installation
 
@@ -166,7 +182,7 @@ After launching the app, download the required binaries:
 2. Select the **Binary** tab
 3. Click the **Download** button for `yt-dlp` and `ffmpeg`
 
-> ⚠️ Video downloads will not work without downloading the binaries
+> ⚠️ Video info preview may work for some URLs without local binaries, but actual downloads require `yt-dlp` and `ffmpeg/ffprobe`
 
 ### 3. Update Binaries
 

@@ -2,43 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Play, Clock, User, List, ChevronDown, ChevronUp, Loader2, AlertCircle, Film, Link2, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useI18n } from '../i18n';
-
-export interface VideoInfo {
-  id: string;
-  title: string;
-  channel: string;
-  channelUrl?: string;
-  thumbnail: string;
-  duration: number;
-  viewCount?: number;
-  uploadDate?: string;
-  description?: string;
-  filesize?: number; // Approximate filesize in bytes
-  formats?: FormatInfo[];
-  bestResolution?: string; // e.g., "1080p", "4K"
-}
-
-export interface FormatInfo {
-  format_id: string;
-  ext: string;
-  resolution?: string;
-  height?: number;
-  filesize?: number;
-  filesize_approx?: number;
-  vcodec?: string;
-  acodec?: string;
-  tbr?: number; // Total bitrate
-  abr?: number; // Audio bitrate
-}
-
-export interface PlaylistInfo {
-  id: string;
-  title: string;
-  channel: string;
-  thumbnail?: string;
-  videoCount: number;
-  entries: VideoInfo[];
-}
+import type { PlaylistInfo, PreviewError, VideoInfo } from '../../shared/contracts';
 
 interface Theme {
   icon: string;
@@ -50,7 +14,7 @@ interface Theme {
 interface VideoPreviewProps {
   url: string;
   isLoading: boolean;
-  error: string | null;
+  error: PreviewError | null;
   videoInfo: VideoInfo | null;
   playlistInfo: PlaylistInfo | null;
   onToggle: () => void;
@@ -106,6 +70,19 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
 
   const isPlaylist = playlistInfo && playlistInfo.entries.length > 1;
   const currentVideo = isPlaylist ? playlistInfo.entries[currentIndex] : videoInfo;
+  const errorLabel = error
+    ? error.code === 'timeout'
+      ? t('videoInfoTimeout')
+      : error.code === 'network'
+        ? t('videoInfoNetworkError')
+        : error.code === 'rate_limited'
+          ? t('videoInfoRateLimited')
+          : error.code === 'auth_required'
+            ? t('videoInfoAuthRequired')
+            : error.code === 'unsupported'
+              ? t('unsupportedUrl')
+              : t('videoInfoUnknownError')
+    : null;
 
   const handlePrevious = () => {
     if (isPlaylist && currentIndex > 0) {
@@ -215,8 +192,8 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
               {isValidUrl && error && !isLoading && (
                 <div className="flex flex-col items-center justify-center py-6 gap-2 text-red-400">
                   <AlertCircle size={24} />
-                  <span className="text-sm text-center">{t('unsupportedUrl')}</span>
-                  <span className="text-[10px] text-gray-500">{error}</span>
+                  <span className="text-sm text-center">{errorLabel}</span>
+                  <span className="text-[10px] text-gray-500">{error.message}</span>
                 </div>
               )}
 

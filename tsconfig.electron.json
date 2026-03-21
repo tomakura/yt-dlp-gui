@@ -4,7 +4,7 @@
 		"module": "ESNext",
 		"moduleResolution": "node",
 		"outDir": "dist-electron",
-		"rootDir": "electron",
+		"rootDir": ".",
 		"noEmit": false,
 		"allowImportingTsExtensions": false,
 		"allowSyntheticDefaultImports": true,
@@ -15,7 +15,8 @@
 		]
 	},
 	"include": [
-		"electron/**/*"
+		"electron/**/*",
+		"shared/**/*"
 	],
 	"exclude": [
 		"node_modules"

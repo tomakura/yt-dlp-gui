@@ -4,7 +4,7 @@ import { X, Save, FolderOpen, Plus, Trash2, Film, Music, Terminal, Palette, Layo
 import { useI18n } from '../i18n';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Preset } from '../types/Preset';
-import { BinaryUpdateProgress } from '../types/electron';
+import type { BinaryUpdateProgress, InstalledBinaryVersions, LatestBinaryVersions } from '../../shared/contracts';
 import { TranslationKey } from '../i18n/translations';
 
 interface SettingsModalProps {
@@ -26,8 +26,8 @@ interface SettingsModalProps {
 	currentTheme: any;
 	setTheme: (theme: any) => void;
 	themes: any;
-	binaryVersions: { ytDlp: string; ffmpeg: string } | null;
-	latestBinaryVersions: { ytDlp: string; ffmpeg: string } | null;
+	binaryVersions: InstalledBinaryVersions | null;
+	latestBinaryVersions: LatestBinaryVersions | null;
 	onClearBinaryStatus: () => void;
 	notificationsEnabled: boolean;
 	setNotificationsEnabled: (enabled: boolean) => void;
@@ -130,6 +130,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 	};
 
 	const activeTheme = themes[currentTheme];
+	const ytDlpVersion = binaryVersions?.ytDlp.detected
+		? binaryVersions.ytDlp.version || t('unknown')
+		: t('notDetected');
+	const ffmpegVersion = binaryVersions?.ffmpeg.detected
+		? binaryVersions.ffmpeg.version || t('unknown')
+		: t('notDetected');
+	const ytDlpLatestKnown = !!latestBinaryVersions?.ytDlp.latestKnown && !!latestBinaryVersions?.ytDlp.version;
+	const ffmpegLatestKnown = !!latestBinaryVersions?.ffmpeg.latestKnown && !!latestBinaryVersions?.ffmpeg.version;
+	const ytDlpUpToDate = ytDlpLatestKnown && binaryVersions?.ytDlp.version === latestBinaryVersions?.ytDlp.version;
+	const ffmpegUpToDate = ffmpegLatestKnown && binaryVersions?.ffmpeg.version === latestBinaryVersions?.ffmpeg.version;
 
 	// Handle ESC key to close modal
 	useEffect(() => {
@@ -406,18 +416,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 																		<span>{t('checking')}</span>
 																	</div>
 																) : (
-																	<div className="text-sm font-mono text-gray-200">{binaryVersions?.ytDlp || t('unknown')}</div>
+																	<div className="text-sm font-mono text-gray-200">{ytDlpVersion}</div>
 																)}
-																{binaryVersions?.ytDlp && binaryVersions.ytDlp !== 'Not detected' && (
-																	latestBinaryVersions?.ytDlp && latestBinaryVersions.ytDlp !== 'Unknown' ? (
-																		binaryVersions.ytDlp === latestBinaryVersions.ytDlp ? (
+																{binaryVersions?.ytDlp.detected && ytDlpLatestKnown && (
+																	ytDlpUpToDate ? (
 																			<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">{t('latest')}</span>
 																		) : (
 																			<span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/20">
-																				{t('updateAvailable')} → {latestBinaryVersions.ytDlp}
+																				{t('updateAvailable')} → {latestBinaryVersions?.ytDlp.version}
 																			</span>
 																		)
-																	) : null
 																)}
 															</div>
 														</div>
@@ -430,20 +438,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 																		<span>{t('checking')}</span>
 																	</div>
 																) : (
-																	<div className="text-sm font-mono text-gray-200">{binaryVersions?.ffmpeg || t('unknown')}</div>
+																	<div className="text-sm font-mono text-gray-200">{ffmpegVersion}</div>
 																)}
-																{binaryVersions?.ffmpeg && binaryVersions.ffmpeg !== 'Not detected' && (
-																	// Show "latest" badge if: ffmpeg is N-* version (yt-dlp/FFmpeg-Builds latest), versions match, or API returned "latest" marker
-																	(binaryVersions.ffmpeg.startsWith('N-') ||
-																		(latestBinaryVersions?.ffmpeg && (
-																			binaryVersions.ffmpeg === latestBinaryVersions.ffmpeg ||
-																			binaryVersions.ffmpeg.includes(latestBinaryVersions.ffmpeg) ||
-																			latestBinaryVersions.ffmpeg === 'latest'
-																		))) ? (
+																{binaryVersions?.ffmpeg.detected && ffmpegLatestKnown && (
+																	ffmpegUpToDate ? (
 																		<span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/20">{t('latest')}</span>
-																	) : latestBinaryVersions?.ffmpeg && latestBinaryVersions.ffmpeg !== 'Unknown' && (
+																	) : (
 																		<span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/20">
-																			{t('updateAvailable')} → {latestBinaryVersions.ffmpeg}
+																			{t('updateAvailable')} → {latestBinaryVersions?.ffmpeg.version}
 																		</span>
 																	)
 																)}
@@ -653,7 +655,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 																<span>{t('checking')}</span>
 															</span>
 														) : (
-															<span className="font-mono">{binaryVersions?.ytDlp || t('unknown')}</span>
+															<span className="font-mono">{ytDlpVersion}</span>
 														)}
 													</div>
 													<div className="flex justify-between py-2 border-b border-white/5">
@@ -664,7 +666,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 																<span>{t('checking')}</span>
 															</span>
 														) : (
-															<span className="font-mono">{binaryVersions?.ffmpeg || t('unknown')}</span>
+															<span className="font-mono">{ffmpegVersion}</span>
 														)}
 													</div>
 												</div>

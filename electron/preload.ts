@@ -1,20 +1,24 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  BinaryPresence,
   DownloadPayload,
   DownloadResult,
   BinaryUpdateProgress,
+  InstalledBinaryVersions,
+  LatestBinaryVersions,
+  VideoInfoRequest,
   VideoInfoResult,
   HwEncoderResult
-} from '../src/types/electron';
+} from '../shared/contracts';
 
 contextBridge.exposeInMainWorld('electron', {
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   getDefaultDownloadPath: () => ipcRenderer.invoke('get-default-download-path'),
-  checkBinaries: () => ipcRenderer.invoke('check-binaries'),
+  checkBinaries: (): Promise<BinaryPresence> => ipcRenderer.invoke('check-binaries'),
   migrateLegacyBinaries: () => ipcRenderer.invoke('migrate-legacy-binaries'),
-  getBinaryVersions: () => ipcRenderer.invoke('get-binary-versions'),
-  getLatestBinaryVersions: () => ipcRenderer.invoke('get-latest-binary-versions'),
+  getBinaryVersions: (): Promise<InstalledBinaryVersions> => ipcRenderer.invoke('get-binary-versions'),
+  getLatestBinaryVersions: (): Promise<LatestBinaryVersions> => ipcRenderer.invoke('get-latest-binary-versions'),
   startDownload: (params: DownloadPayload) => ipcRenderer.send('download', params),
   cancelDownload: () => ipcRenderer.invoke('cancel-download'),
   onDownloadProgress: (callback: (data: string) => void) => {
@@ -41,8 +45,8 @@ contextBridge.exposeInMainWorld('electron', {
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   downloadBinaries: () => ipcRenderer.invoke('download-binaries'),
   openFolder: (folderPath: string) => ipcRenderer.send('open-folder', folderPath),
-  fetchVideoInfo: (url: string): Promise<VideoInfoResult> =>
-    ipcRenderer.invoke('fetch-video-info', url),
+  fetchVideoInfo: (request: VideoInfoRequest): Promise<VideoInfoResult> =>
+    ipcRenderer.invoke('fetch-video-info', request),
   detectHwEncoders: (): Promise<HwEncoderResult> =>
     ipcRenderer.invoke('detect-hw-encoders'),
 });

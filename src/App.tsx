@@ -8,12 +8,20 @@ import { AdvancedOptions } from './components/AdvancedOptions';
 import { StatusToast, Status } from './components/StatusToast';
 import { SettingsModal } from './components/SettingsModal';
 import { DownloadHistory } from './components/DownloadHistory';
-import { VideoPreview, VideoInfo, PlaylistInfo } from './components/VideoPreview';
+import { VideoPreview } from './components/VideoPreview';
 import { QueueList } from './components/QueueList';
 import { FormatOptions, AdvancedOptionsState, DownloadHistoryItem } from './types/options';
-import { DownloadResult, BinaryUpdateProgress } from './types/electron';
 import { Preset } from './types/Preset';
 import { useI18n } from './i18n';
+import type {
+	BinaryUpdateProgress,
+	DownloadResult,
+	InstalledBinaryVersions,
+	LatestBinaryVersions,
+	PlaylistInfo,
+	PreviewError,
+	VideoInfo
+} from '../shared/contracts';
 
 // Detect OS for keyboard shortcut display
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -103,6 +111,17 @@ const themes: Record<Theme, {
 	}
 };
 
+const safeParseLocalStorage = <T,>(key: string, fallback: T): T => {
+	try {
+		const value = localStorage.getItem(key);
+		return value ? JSON.parse(value) as T : fallback;
+	} catch {
+		return fallback;
+	}
+};
+
+const isValidTimecode = (value: string) => /^\d{2}:\d{2}:\d{2}$/.test(value);
+
 function App() {
 	const { t } = useI18n();
 	const [url, setUrl] = useState('');
@@ -122,7 +141,6 @@ function App() {
 	const theme = themes[currentTheme];
 
 	const [formatOptions, setFormatOptions] = useState<FormatOptions>(() => {
-		const saved = localStorage.getItem('lastFormatOptions');
 		const defaultConversion = {
 			enabled: true,
 			videoCodec: 'h264',
@@ -132,11 +150,16 @@ function App() {
 			hwEncoder: 'auto'
 		};
 
-		if (saved) {
-			const parsed = JSON.parse(saved);
+		const parsed = safeParseLocalStorage<Partial<FormatOptions> | null>('lastFormatOptions', null);
+		if (parsed) {
 			return {
-				...parsed,
-				type: 'video',
+				type: parsed.type || 'video',
+				videoContainer: parsed.videoContainer || 'mp4',
+				videoResolution: parsed.videoResolution || 'best',
+				audioFormat: parsed.audioFormat || 'mp3',
+				audioBitrate: parsed.audioBitrate || '320k',
+				audioSampleRate: parsed.audioSampleRate || '48000',
+				audioBitDepth: parsed.audioBitDepth || '16',
 				conversion: parsed.conversion || defaultConversion
 			};
 		}
@@ -154,8 +177,7 @@ function App() {
 	});
 
 	const [advancedOptions, setAdvancedOptions] = useState<AdvancedOptionsState>(() => {
-		const saved = localStorage.getItem('lastAdvancedOptions');
-		return saved ? JSON.parse(saved) : {
+		return safeParseLocalStorage<AdvancedOptionsState>('lastAdvancedOptions', {
 			embedThumbnail: true,
 			addMetadata: true,
 			embedSubs: false,
@@ -164,7 +186,7 @@ function App() {
 			playlist: 'default',
 			cookiesBrowser: 'none',
 			timeRange: { enabled: false, start: '', end: '' }
-		};
+		});
 	});
 
 	// Settings State
@@ -188,10 +210,10 @@ function App() {
 	}, [autoUpdateBinaries]);
 
 	// Batch Download Queue
-	const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>(() => {
-		const saved = localStorage.getItem('downloadQueue');
-		return saved ? JSON.parse(saved) : [];
-	});
+	const [downloadQueue, setDownloadQueue] = useState<{ url: string; subfolder?: string }[]>(
+		() => safeParseLocalStorage<{ url: string; subfolder?: string }[]>('downloadQueue', [])
+	);
+	const [queueResumeReady, setQueueResumeReady] = useState(() => safeParseLocalStorage<{ url: string; subfolder?: string }[]>('downloadQueue', []).length === 0);
 	const [activePage, setActivePage] = useState<'download' | 'history'>('download');
 	const [isQueueOpen, setIsQueueOpen] = useState(false);
 
@@ -201,27 +223,24 @@ function App() {
 	const [binaryUpdateProgress, setBinaryUpdateProgress] = useState<BinaryUpdateProgress | null>(null);
 	const [isUpdatingBinaries, setIsUpdatingBinaries] = useState(false);
 	const [isBinaryVersionLoading, setIsBinaryVersionLoading] = useState(false);
-	const [binaryVersions, setBinaryVersions] = useState<{ ytDlp: string; ffmpeg: string } | null>(null);
-	const [latestBinaryVersions, setLatestBinaryVersions] = useState<{ ytDlp: string; ffmpeg: string } | null>(null);
+	const [binaryVersions, setBinaryVersions] = useState<InstalledBinaryVersions | null>(null);
+	const [latestBinaryVersions, setLatestBinaryVersions] = useState<LatestBinaryVersions | null>(null);
 
 	// Clipboard Monitor State
 	const [isClipboardMonitorEnabled, setIsClipboardMonitorEnabled] = useState(false);
 
 	// Favorites State
-	const [favorites, setFavorites] = useState<string[]>(() => {
-		const saved = localStorage.getItem('favoriteFolders');
-		return saved ? JSON.parse(saved) : [];
-	});
+	const [favorites, setFavorites] = useState<string[]>(() => safeParseLocalStorage<string[]>('favoriteFolders', []));
 
 	useEffect(() => {
 		localStorage.setItem('downloadQueue', JSON.stringify(downloadQueue));
 	}, [downloadQueue]);
 
 	// Download History State
-	const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>(() => {
-		const saved = localStorage.getItem('downloadHistory');
-		return saved ? JSON.parse(saved) : [];
-	});
+	const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>(
+		() => safeParseLocalStorage<DownloadHistoryItem[]>('downloadHistory', [])
+	);
+	const [customArgsText, setCustomArgsText] = useState(() => localStorage.getItem('customArgsText') || '');
 
 	const [showConsole, setShowConsole] = useState(false);
 
@@ -237,12 +256,10 @@ function App() {
 
 	// Video Preview State
 	const [videoPreviewLoading, setVideoPreviewLoading] = useState(false);
-	const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
+	const [videoPreviewError, setVideoPreviewError] = useState<PreviewError | null>(null);
 	const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
 	const [playlistInfo, setPlaylistInfo] = useState<PlaylistInfo | null>(null);
 	const [isVideoPreviewExpanded, setIsVideoPreviewExpanded] = useState(true);
-
-	const isMac = navigator.userAgent.includes('Mac');
 
 	// Calculate estimated size based on format options and video info
 	const estimatedSize = useMemo(() => {
@@ -520,7 +537,11 @@ function App() {
 				const electronApi = getElectronApi();
 				if (!electronApi) {
 					setVideoPreviewLoading(false);
-					setVideoPreviewError('Electron API is unavailable');
+					setVideoPreviewError({
+						code: 'unknown',
+						source: 'fast',
+						message: 'Electron API is unavailable'
+					});
 					return;
 				}
 
@@ -530,7 +551,10 @@ function App() {
 				setPlaylistInfo(null);
 
 				try {
-					const result = await electronApi.fetchVideoInfo(urlToFetch);
+					const result = await electronApi.fetchVideoInfo({
+						url: urlToFetch,
+						cookiesBrowser: advancedOptions.cookiesBrowser
+					});
 
 					// Check if this request is still the latest one
 					if (currentRequestId !== fetchRequestIdRef.current) {
@@ -550,7 +574,11 @@ function App() {
 					if (currentRequestId !== fetchRequestIdRef.current) {
 						return;
 					}
-					setVideoPreviewError(err.message || 'Failed to fetch video info');
+					setVideoPreviewError({
+						code: 'unknown',
+						source: 'fast',
+						message: err.message || 'Failed to fetch video info'
+					});
 				} finally {
 					// Only update loading state if this is still the latest request
 					if (currentRequestId === fetchRequestIdRef.current) {
@@ -559,19 +587,20 @@ function App() {
 				}
 			}, 500); // Debounce 500ms
 		},
-		[getElectronApi]
+		[advancedOptions.cookiesBrowser, getElectronApi]
 	);
 
 	// Trigger video info fetch when URL changes
 	useEffect(() => {
-		if (url && binariesExist) {
+		if (url) {
 			setIsVideoPreviewExpanded(true); // Expand preview when URL changes
 			fetchVideoInfoDebounced(url);
 		} else {
 			setVideoInfo(null);
 			setPlaylistInfo(null);
+			setVideoPreviewError(null);
 		}
-	}, [url, binariesExist, fetchVideoInfoDebounced]);
+	}, [url, fetchVideoInfoDebounced]);
 
 	const checkBinaries = async () => {
 		const electronApi = getElectronApi();
@@ -582,9 +611,7 @@ function App() {
 
 		try {
 			const result = await electronApi.checkBinaries();
-			console.log('checkBinaries result:', result);
-			// Assuming result is { ytdlp: boolean, ffmpeg: boolean, path: string }
-			const allExist = result.ytdlp && result.ffmpeg;
+			const allExist = result.ytDlp && result.ffmpeg && result.ffprobe;
 			setBinariesExist(allExist);
 
 			if (allExist) {
@@ -612,13 +639,16 @@ function App() {
 							`Migrated legacy binaries: ${migration.copied.join(', ')}`
 						]);
 						const recheck = await electronApi.checkBinaries();
-						const allExistAfter = recheck.ytdlp && recheck.ffmpeg;
+						const allExistAfter = recheck.ytDlp && recheck.ffmpeg && recheck.ffprobe;
 						setBinariesExist(allExistAfter);
 						if (allExistAfter) {
 							setIsBinaryVersionLoading(true);
 							try {
 								const versions = await electronApi.getBinaryVersions();
 								setBinaryVersions(versions);
+								electronApi.getLatestBinaryVersions().then(setLatestBinaryVersions).catch(err => {
+									console.error('Failed to fetch latest versions', err);
+								});
 							} finally {
 								setIsBinaryVersionLoading(false);
 							}
@@ -660,13 +690,15 @@ function App() {
 	// Effect to trigger binary update if auto-update is enabled and updates are available
 	useEffect(() => {
 		if (autoUpdateBinaries && binariesExist && latestBinaryVersions && binaryVersions) {
-			const shouldUpdateYtDlp = latestBinaryVersions.ytDlp !== 'Unknown' && latestBinaryVersions.ytDlp !== binaryVersions.ytDlp;
+			const shouldUpdateYtDlp =
+				latestBinaryVersions.ytDlp.latestKnown &&
+				!!latestBinaryVersions.ytDlp.version &&
+				binaryVersions.ytDlp.version !== latestBinaryVersions.ytDlp.version;
 
-			// For ffmpeg, simplest logic: update if different and not unknown
-			const shouldUpdateFfmpeg = latestBinaryVersions.ffmpeg !== 'Unknown' &&
-				latestBinaryVersions.ffmpeg !== 'latest' &&
-				!binaryVersions.ffmpeg.startsWith('N-') &&
-				binaryVersions.ffmpeg !== latestBinaryVersions.ffmpeg;
+			const shouldUpdateFfmpeg =
+				latestBinaryVersions.ffmpeg.latestKnown &&
+				!!latestBinaryVersions.ffmpeg.version &&
+				binaryVersions.ffmpeg.version !== latestBinaryVersions.ffmpeg.version;
 
 			if (shouldUpdateYtDlp && !isUpdatingBinaries) {
 				handleUpdateBinaries();
@@ -702,6 +734,25 @@ function App() {
 
 		checkBinaries();
 	}, [getElectronApi]);
+
+	useEffect(() => {
+		localStorage.setItem('customArgsText', customArgsText);
+	}, [customArgsText]);
+
+	useEffect(() => {
+		if (queueResumeReady || downloadQueue.length === 0) {
+			return;
+		}
+
+		const shouldResume = window.confirm(t('resumeQueuePrompt', { count: String(downloadQueue.length) }));
+		if (shouldResume) {
+			setLogs(prev => [...prev, t('queueResumed')]);
+		} else {
+			setDownloadQueue([]);
+			setLogs(prev => [...prev, t('queueDiscarded')]);
+		}
+		setQueueResumeReady(true);
+	}, [downloadQueue.length, queueResumeReady, t]);
 
 	// Separate effect for download listeners to avoid stale closures
 	useEffect(() => {
@@ -758,14 +809,14 @@ function App() {
 		const removeCompleteListeners = electronApi.onDownloadComplete((result: DownloadResult) => {
 			setIsDownloading(false);
 
-			if (result.message.toLowerCase().includes('cancel')) {
+			if (result.status === 'cancelled') {
 				setStatus('cancelled');
 			} else {
-				setStatus(result.success ? 'complete' : 'error');
+				setStatus(result.status === 'complete' ? 'complete' : 'error');
 			}
 
 			setLogs(prev => [...prev, result.message]);
-			setDownloadProgress(result.success ? 100 : 0);
+			setDownloadProgress(result.status === 'complete' ? 100 : 0);
 
 			// Add to history - use refs to get current values
 			setDownloadHistory(prev => {
@@ -872,9 +923,21 @@ function App() {
 		if (!electronApi) return;
 
 		if (!targetUrl) return;
+		if (binariesExist !== true) {
+			return;
+		}
 		if (!location) {
 			alert(t('selectDestination'));
 			return;
+		}
+
+		if (advancedOptions.timeRange.enabled) {
+			const hasInvalidStart = advancedOptions.timeRange.start && !isValidTimecode(advancedOptions.timeRange.start);
+			const hasInvalidEnd = advancedOptions.timeRange.end && !isValidTimecode(advancedOptions.timeRange.end);
+			if (hasInvalidStart || hasInvalidEnd) {
+				alert(t('invalidTimeRange'));
+				return;
+			}
 		}
 
 		setIsDownloading(true);
@@ -890,9 +953,10 @@ function App() {
 		setTotalSize('');
 		setEta('');
 
-		const args: string[] = [];
-		const customArgsInput = document.getElementById('custom-args') as HTMLInputElement;
-		const customArgs = customArgsInput?.value ? customArgsInput.value.split(' ').filter(a => a) : [];
+		const customArgs = customArgsText
+			.split(/\r?\n/)
+			.map(arg => arg.trim())
+			.filter(Boolean);
 
 		// Determine final output template
 		let finalOutputTemplate = outputTemplate;
@@ -909,7 +973,6 @@ function App() {
 
 		electronApi.startDownload({
 			url: targetUrl,
-			format: formatOptions.type,
 			location,
 			args: customArgs,
 			options: formatOptions,
@@ -918,7 +981,7 @@ function App() {
 			outputTemplate: finalOutputTemplate,
 			notificationsEnabled
 		});
-	}, [advancedOptions, formatOptions, getElectronApi, location, notificationsEnabled, outputTemplate, playlistInfo, t]);
+	}, [advancedOptions, binariesExist, customArgsText, formatOptions, getElectronApi, location, notificationsEnabled, outputTemplate, playlistInfo, t]);
 
 	// Update original handleDownload to use the new function
 	const handleDownload = useCallback(() => {
@@ -956,7 +1019,7 @@ function App() {
 
 	// Queue processing effect - improved
 	useEffect(() => {
-		if (!isDownloading && downloadQueue.length > 0) {
+		if (queueResumeReady && binariesExist === true && !isDownloading && downloadQueue.length > 0) {
 			const nextItem = downloadQueue[0];
 			setDownloadQueue(prev => prev.slice(1));
 			// Update URL state for UI consistency
@@ -965,7 +1028,7 @@ function App() {
 			// Start download
 			startDownloadProcess(nextItem.url, nextItem.subfolder);
 		}
-	}, [isDownloading, downloadQueue, startDownloadProcess, t]);
+	}, [binariesExist, downloadQueue, isDownloading, queueResumeReady, startDownloadProcess, t]);
 
 	const handleBatchImport = async () => {
 		const electronApi = getElectronApi();
@@ -998,7 +1061,7 @@ function App() {
 		const handleKeyDown = (e: KeyboardEvent) => {
 			// Cmd/Ctrl + Enter to start download
 			if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-				if (!isDownloading && url && location && binariesExist !== false && !isSettingsOpen) {
+				if (!isDownloading && url && location && binariesExist === true && !isSettingsOpen) {
 					handleDownload();
 				}
 			}
@@ -1254,13 +1317,14 @@ function App() {
 													<Terminal size={12} />
 													{t('customArgs')}
 												</summary>
-												<div className="mt-1">
-													<input
-														type="text"
+												<div className="mt-1 space-y-2">
+													<textarea
 														placeholder={t('customArgsPlaceholder')}
-														className="w-full glass-input rounded-xl px-3 py-2 text-[10px] text-gray-300 placeholder-gray-600"
-														id="custom-args"
+														className="w-full glass-input rounded-xl px-3 py-2 text-[10px] text-gray-300 placeholder-gray-600 min-h-24 resize-y"
+														value={customArgsText}
+														onChange={(e) => setCustomArgsText(e.target.value)}
 													/>
+													<p className="text-[10px] text-gray-500">{t('customArgsHelp')}</p>
 												</div>
 											</details>
 										</div>
@@ -1274,7 +1338,7 @@ function App() {
 											whileHover={{ scale: 1.01, boxShadow: "0 0 30px rgba(168, 85, 247, 0.4)" }}
 											whileTap={{ scale: 0.99 }}
 											onClick={handleDownload}
-											disabled={isDownloading || !url || !location || binariesExist === false}
+											disabled={isDownloading || !url || !location || binariesExist !== true}
 											className={`relative flex-1 py-3 rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-all overflow-hidden ${isDownloading
 												? 'bg-white/5 cursor-not-allowed text-gray-300 border border-white/10'
 												: `${theme.button} text-white shadow-xl ${theme.buttonShadow} border border-white/10`
@@ -1314,8 +1378,8 @@ function App() {
 											whileHover={{ scale: 1.05 }}
 											whileTap={{ scale: 0.97 }}
 											onClick={handleAddToQueue}
-											disabled={!url || !location || binariesExist === false}
-											className={`px-4 rounded-2xl border transition-all flex items-center gap-2 text-sm font-medium ${!url || !location || binariesExist === false
+											disabled={!url || !location || binariesExist !== true}
+											className={`px-4 rounded-2xl border transition-all flex items-center gap-2 text-sm font-medium ${!url || !location || binariesExist !== true
 												? 'bg-white/5 border-white/10 text-gray-400 cursor-not-allowed'
 												: 'bg-white/10 border-white/20 text-white hover:bg-white/15'}`}
 										>
