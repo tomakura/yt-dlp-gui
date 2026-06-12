@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Download, Terminal, AlertCircle, X, Settings as SettingsIcon, History, XCircle, Zap, ListPlus, ArrowUp, ArrowDown, Trash2, ClipboardList } from 'lucide-react';
+import { Download, Terminal, AlertCircle, X, Settings as SettingsIcon, History, XCircle, Zap, ListPlus, ArrowUp, ArrowDown, Trash2, ClipboardList, Activity, CheckCircle2, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UrlInput } from './components/UrlInput';
 import { FormatSelector } from './components/FormatSelector';
@@ -28,6 +28,7 @@ const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
 // Theme Definitions
 type Theme = 'default' | 'cyberpunk' | 'ocean' | 'forest';
+type DownloadPhase = 'preparing' | 'downloading' | 'postprocessing' | 'cleanup' | 'complete';
 
 const themes: Record<Theme, {
 	name: string;
@@ -392,6 +393,27 @@ function App() {
 	const [logs, setLogs] = useState<string[]>([]);
 	const logsEndRef = useRef<HTMLDivElement>(null);
 	const logsContainerRef = useRef<HTMLDivElement>(null);
+	const lastLoggedDownloadBucketRef = useRef(-1);
+	const lastLoggedFfmpegSecondRef = useRef(-1);
+	const [progressPhase, setProgressPhase] = useState<DownloadPhase>('preparing');
+	const [progressSummary, setProgressSummary] = useState('');
+	const [progressDetail, setProgressDetail] = useState('');
+	const [progressIndeterminate, setProgressIndeterminate] = useState(false);
+
+	const progressSteps = useMemo(() => [
+		{ phase: 'preparing' as DownloadPhase, label: t('progressStepPreparing') },
+		{ phase: 'downloading' as DownloadPhase, label: t('progressStepDownloading') },
+		{ phase: 'postprocessing' as DownloadPhase, label: t('progressStepPostprocessing') },
+		{ phase: 'cleanup' as DownloadPhase, label: t('progressStepCleanup') },
+	], [t]);
+
+	const progressPhaseRank: Record<DownloadPhase, number> = {
+		preparing: 0,
+		downloading: 1,
+		postprocessing: 2,
+		cleanup: 3,
+		complete: 4
+	};
 
 	// Auto scroll logs
 	useEffect(() => {
@@ -402,13 +424,47 @@ function App() {
 
 	// Parse progress from yt-dlp output
 	const parseProgress = useCallback((log: string) => {
+		const postprocessLabel = (processor: string) => {
+			const normalized = processor.toLowerCase();
+			if (normalized.includes('merger')) return t('progressMerging');
+			if (normalized.includes('videoconvertor') || normalized.includes('videoremuxer')) return t('progressConvertingVideo');
+			if (normalized.includes('extractaudio')) return t('progressConvertingAudio');
+			if (normalized.includes('embedthumbnail') || normalized.includes('thumbnails')) return t('progressEmbeddingThumbnail');
+			if (normalized.includes('metadata')) return t('progressEmbeddingMetadata');
+			if (normalized.includes('subtitle')) return t('progressEmbeddingSubtitles');
+			if (normalized.includes('movefiles')) return t('progressFinalizing');
+			return processor;
+		};
+
+		if (log.startsWith('⏳')) {
+			setProgressPhase('preparing');
+			setProgressSummary(t('progressPreparing'));
+			setProgressDetail(log.replace(/^⏳\s*/, ''));
+			setProgressIndeterminate(true);
+		} else if (log.startsWith('🧹')) {
+			setProgressPhase('cleanup');
+			setProgressSummary(t('progressCleaningUp'));
+			setProgressDetail(log.replace(/^🧹\s*/, ''));
+			setProgressIndeterminate(true);
+		} else if (log.startsWith('✅')) {
+			setProgressPhase('complete');
+			setProgressSummary(t('downloadComplete'));
+			setProgressDetail(log.replace(/^✅\s*/, ''));
+			setProgressIndeterminate(false);
+			setDownloadProgress(100);
+		}
+
 		// Match patterns like "[download]  45.2% of 100.00MiB at 5.00MiB/s ETA 00:10"
-		const downloadMatch = log.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\d+\.?\d*\w+)\s+at\s+(\d+\.?\d*\w+\/s)\s+ETA\s+(\S+)/i);
+		const downloadMatch = log.match(/\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+~?(\d+(?:\.\d+)?\w+)(?:\s+at\s+(\S+\/s))?(?:\s+ETA\s+(\S+))?/i);
 		if (downloadMatch) {
-			setDownloadProgress(parseFloat(downloadMatch[1]));
+			const percentValue = parseFloat(downloadMatch[1]);
+			setProgressPhase('downloading');
+			setProgressSummary(t('progressDownloading'));
+			setProgressIndeterminate(false);
+			setDownloadProgress(percentValue);
 			setTotalSize(downloadMatch[2]);
-			setDownloadSpeed(downloadMatch[3]);
-			setEta(downloadMatch[4]);
+			if (downloadMatch[3]) setDownloadSpeed(downloadMatch[3]);
+			if (downloadMatch[4]) setEta(downloadMatch[4]);
 
 			// Calculate downloaded size
 			const percent = parseFloat(downloadMatch[1]) / 100;
@@ -418,13 +474,34 @@ function App() {
 				const downloaded = total * percent;
 				const unit = downloadMatch[2].replace(/[\d.]/g, '');
 				setDownloadedSize(`${downloaded.toFixed(1)}${unit}`);
+				setProgressDetail(`${downloaded.toFixed(1)}${unit} / ${downloadMatch[2]}`);
+			} else {
+				setProgressDetail(downloadMatch[2]);
 			}
 			return;
 		}
 
+		const completedDownloadMatch = log.match(/\[download\]\s+100%\s+of\s+~?(\d+(?:\.\d+)?\w+).*?\s+at\s+(\S+\/s)/i);
+		if (completedDownloadMatch) {
+			setProgressPhase('downloading');
+			setProgressSummary(t('progressDownloadFinished'));
+			setProgressDetail(`${completedDownloadMatch[1]} / ${completedDownloadMatch[1]}`);
+			setProgressIndeterminate(false);
+			setDownloadProgress(100);
+			setTotalSize(completedDownloadMatch[1]);
+			setDownloadedSize(completedDownloadMatch[1]);
+			setDownloadSpeed(completedDownloadMatch[2]);
+			setEta('');
+			return;
+		}
+
 		// Match simpler pattern "[download]  45.2% of 100.00MiB"
-		const simpleMatch = log.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\d+\.?\d*\w+)/i);
+		const simpleMatch = log.match(/\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+~?(\d+(?:\.\d+)?\w+)/i);
 		if (simpleMatch) {
+			setProgressPhase('downloading');
+			setProgressSummary(t('progressDownloading'));
+			setProgressDetail(simpleMatch[2]);
+			setProgressIndeterminate(false);
 			setDownloadProgress(parseFloat(simpleMatch[1]));
 			setTotalSize(simpleMatch[2]);
 		}
@@ -434,74 +511,160 @@ function App() {
 			/\[(ExtractAudio|Merger|VideoConvertor|VideoRemuxer|EmbedThumbnail|Metadata(Parser)?|ModifyChapters|Fixup[A-Za-z]+)\]/.test(log) ||
 			log.includes('Postprocessing:') ||
 			log.includes('Deleting original file') ||
-			log.includes('Destination:')
+			(log.includes('Destination:') && !log.startsWith('[download]'))
 		) {
 			setProgressStage('converting');
 		}
 
-		// Also match ffmpeg conversion progress
-		const ffmpegMatch = log.match(/time=(\d+):(\d+):(\d+)/);
-		if (ffmpegMatch) {
-			setProgressStage('converting');
-			// Just indicate activity during conversion
-			setDownloadProgress(prev => Math.min(prev + 0.1, 99));
+		const postprocessLineMatch = log.match(/^\[(ExtractAudio|Merger|VideoConvertor|VideoRemuxer|EmbedThumbnail|Metadata(Parser)?|EmbedSubtitle|MoveFiles)\]\s+(.+)$/);
+		if (postprocessLineMatch) {
+			const processorLabel = postprocessLabel(postprocessLineMatch[1]);
+			setProgressPhase('postprocessing');
+			setProgressSummary(processorLabel);
+			setProgressDetail(postprocessLineMatch[3]);
+			setProgressIndeterminate(true);
 		}
-	}, []);
+
+		const postprocessMatch = log.match(/^\[postprocess\]\s+(\S+)\s+(started|finished)$/i);
+		if (postprocessMatch) {
+			const processorLabel = postprocessLabel(postprocessMatch[1]);
+			const isStarted = postprocessMatch[2].toLowerCase() === 'started';
+			setProgressPhase('postprocessing');
+			setProgressStage('converting');
+			setProgressSummary(processorLabel);
+			setProgressDetail(isStarted
+				? t('progressStepStarted', { step: processorLabel })
+				: t('progressStepFinished', { step: processorLabel })
+			);
+			if (isStarted) {
+				setProgressIndeterminate(true);
+			} else {
+				setProgressIndeterminate(false);
+				setDownloadProgress(100);
+			}
+		}
+
+		// Also match ffmpeg conversion progress
+		const ffmpegMatch = log.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+		if (ffmpegMatch) {
+			setProgressPhase('postprocessing');
+			setProgressStage('converting');
+			setProgressSummary(t('progressConvertingVideo'));
+			const hours = Number(ffmpegMatch[1]);
+			const minutes = Number(ffmpegMatch[2]);
+			const seconds = Number(ffmpegMatch[3]);
+			const elapsedSeconds = hours * 3600 + minutes * 60 + seconds;
+			const sourceDuration = videoInfo?.duration || playlistInfo?.entries?.[0]?.duration || 0;
+			if (sourceDuration > 0) {
+				setProgressIndeterminate(false);
+				setDownloadProgress(Math.min((elapsedSeconds / sourceDuration) * 100, 99));
+				setProgressDetail(`${ffmpegMatch[1]}:${ffmpegMatch[2]}:${ffmpegMatch[3]}`);
+			} else {
+				setProgressIndeterminate(true);
+				setProgressDetail(`${ffmpegMatch[1]}:${ffmpegMatch[2]}:${ffmpegMatch[3]}`);
+			}
+		}
+	}, [playlistInfo, t, videoInfo]);
 
 	const appendRuntimeLog = useCallback((rawLog: string) => {
 		const log = rawLog.trim();
 		if (!log) return;
 
-		const isVerboseProgress =
-			log.startsWith('[download]') ||
+		let displayLog = log;
+
+		const downloadProgressMatch = log.match(/\[download\]\s+(\d+(?:\.\d+)?)%/i);
+		if (downloadProgressMatch) {
+			const percent = Number(downloadProgressMatch[1]);
+			const bucket = percent >= 100 ? 100 : Math.floor(percent / 10) * 10;
+			if (bucket <= lastLoggedDownloadBucketRef.current) {
+				return;
+			}
+			lastLoggedDownloadBucketRef.current = bucket;
+			const speed = log.match(/\s+at\s+(\S+\/s)/i)?.[1];
+			const etaText = log.match(/\s+ETA\s+(\S+)/i)?.[1];
+			displayLog = `📥 ダウンロード ${percent.toFixed(1)}%${speed ? ` / ${speed}` : ''}${etaText ? ` / ETA ${etaText}` : ''}`;
+		} else if (log.includes('Extracting URL:')) {
+			displayLog = `🔎 URLを解析中: ${log.split('Extracting URL:').pop()?.trim() || ''}`;
+		} else if (
 			log.includes('Downloading webpage') ||
 			log.includes('Downloading player') ||
 			log.includes('Downloading android ') ||
 			log.includes('Downloading web ') ||
-			log.includes('Downloading m3u8 information') ||
-			log.includes('Extracting URL:') ||
+			log.includes('Downloading m3u8 information')
+		) {
+			displayLog = `🌐 情報取得: ${log.replace(/^\[[^\]]+\]\s*/, '')}`;
+		} else if (log.includes('Downloading 1 format(s):') || log.includes('Downloading 2 format(s):')) {
+			displayLog = `🎯 取得形式: ${log.split(':').pop()?.trim() || log}`;
+		} else if (log.match(/^\[download\]\s+Destination:/i)) {
+			displayLog = `📄 ダウンロード先: ${log.replace(/^\[download\]\s+Destination:\s*/i, '')}`;
+		} else if (log.match(/^\[Merger\]\s+Merging formats into/i)) {
+			displayLog = `🔀 映像と音声を結合: ${log.match(/"(.+)"$/)?.[1] || log}`;
+		} else if (log.match(/^\[Video(Convertor|Remuxer)\].*Destination:/i)) {
+			displayLog = `🎞 ffmpeg変換: ${log.replace(/^\[[^\]]+\]\s*/, '')}`;
+		} else if (log.match(/^\[ExtractAudio\].*Destination:/i)) {
+			displayLog = `🎵 音声変換: ${log.replace(/^\[ExtractAudio\]\s*/, '')}`;
+		} else if (log.match(/^\[Metadata\]/i)) {
+			displayLog = `🏷 メタデータ: ${log.replace(/^\[Metadata\]\s*/, '')}`;
+		} else if (log.match(/^\[EmbedThumbnail\]/i)) {
+			displayLog = `🖼 サムネイル: ${log.replace(/^\[EmbedThumbnail\]\s*/, '')}`;
+		} else if (log.match(/^\[EmbedSubtitle\]/i)) {
+			displayLog = `💬 字幕: ${log.replace(/^\[EmbedSubtitle\]\s*/, '')}`;
+		} else if (log.match(/^\[postprocess\]\s+\S+\s+(started|finished)$/i)) {
+			const [, processor, state] = log.match(/^\[postprocess\]\s+(\S+)\s+(started|finished)$/i) || [];
+			displayLog = state === 'started'
+				? `⚙️ 後処理開始: ${processor}`
+				: `✅ 後処理完了: ${processor}`;
+		} else if (log.includes('Deleting original file')) {
+			displayLog = `🧹 一時ファイル削除: ${log.replace(/^Deleting original file\s*/i, '')}`;
+		} else if (log.includes('time=')) {
+			const ffmpegMatch = log.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+			if (!ffmpegMatch) return;
+			const elapsedSeconds =
+				Number(ffmpegMatch[1]) * 3600 +
+				Number(ffmpegMatch[2]) * 60 +
+				Number(ffmpegMatch[3]);
+			if (elapsedSeconds - lastLoggedFfmpegSecondRef.current < 10) {
+				return;
+			}
+			lastLoggedFfmpegSecondRef.current = elapsedSeconds;
+			displayLog = `🎞 ffmpeg進捗: ${ffmpegMatch[1]}:${ffmpegMatch[2]}:${ffmpegMatch[3]}`;
+		} else if (
 			log.includes('Formats sorted by:') ||
 			log.includes('Sort order given by extractor:') ||
-			log.includes('Default format spec:') ||
-			log.includes('Downloading 1 format(s):') ||
-			log.includes('Postprocessing:') ||
-			log.includes('time=');
-
-		const isSetupNoise =
-			log.startsWith('🔗 URL:') ||
-			log.startsWith('🛠 yt-dlp Path:') ||
-			log.startsWith('🧠 JS Runtime:') ||
-			log.startsWith('🎵 音声形式:') ||
-			log.startsWith('🎬 動画形式:') ||
-			log.startsWith('📐 解像度:') ||
-			log.startsWith('📊 ビット深度:') ||
-			log.startsWith('📊 ビットレート:') ||
-			log.startsWith('🔄 変換オプション:');
-
-		if (isVerboseProgress || isSetupNoise) {
+			log.includes('Default format spec:')
+		) {
 			return;
-		}
-
-		const shouldKeep =
-			log.startsWith('⏳') ||
-			log.startsWith('✅') ||
-			log.startsWith('🚫') ||
-			log.startsWith('❌') ||
-			log.includes('ERROR:') ||
-			log.includes('WARNING:') ||
-			log.includes('Unable to') ||
-			log.includes('failed');
-
-		if (!shouldKeep) {
+		} else if (
+			!log.startsWith('📥') &&
+			!log.startsWith('🔗') &&
+			!log.startsWith('🛠') &&
+			!log.startsWith('🧠') &&
+			!log.startsWith('📁') &&
+			!log.startsWith('🧰') &&
+			!log.startsWith('🎵') &&
+			!log.startsWith('🎬') &&
+			!log.startsWith('📐') &&
+			!log.startsWith('📊') &&
+			!log.startsWith('🔄') &&
+			!log.startsWith('⏳') &&
+			!log.startsWith('✅') &&
+			!log.startsWith('🚫') &&
+			!log.startsWith('❌') &&
+			!log.startsWith('⚠️') &&
+			!log.includes('ERROR:') &&
+			!log.includes('WARNING:') &&
+			!log.includes('Unable to') &&
+			!log.includes('failed')
+		) {
 			return;
 		}
 
 		setLogs(prev => {
-			if (prev[prev.length - 1] === log) {
+			if (prev[prev.length - 1] === displayLog) {
 				return prev;
 			}
 
-			return [...prev.slice(-49), log];
+			return [...prev.slice(-79), displayLog];
 		});
 	}, []);
 
@@ -958,6 +1121,12 @@ function App() {
 		setDownloadProgress(0);
 		setCurrentDownloadUrl(targetUrl);
 		setLogs([t('startingDownload')]);
+		lastLoggedDownloadBucketRef.current = -1;
+		lastLoggedFfmpegSecondRef.current = -1;
+		setProgressPhase('preparing');
+		setProgressSummary(t('progressPreparing'));
+		setProgressDetail(targetUrl);
+		setProgressIndeterminate(true);
 
 		// Reset progress details
 		setDownloadSpeed('');
@@ -1161,6 +1330,12 @@ function App() {
 			setLogs(prev => [...prev, t('binaryDownloadFailed')]);
 		}
 	};
+
+	const currentProgressPercent = Math.max(0, Math.min(100, downloadProgress));
+	const activeProgressStepIndex = progressPhaseRank[progressPhase];
+	const progressPercentText = progressIndeterminate
+		? t('progressWorking')
+		: `${currentProgressPercent.toFixed(currentProgressPercent >= 10 || currentProgressPercent === 0 ? 0 : 1)}%`;
 
 	return (
 		<div className="h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-hidden relative flex flex-col">
@@ -1370,11 +1545,10 @@ function App() {
 												{isDownloading ? (
 													<>
 														<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-														{progressStage === 'converting' ? (
-															<span className="animate-pulse">{t('converting')} {downloadProgress > 0 && `${downloadProgress.toFixed(1)}%`}</span>
-														) : (
-															<span>{t('processing')} {downloadProgress > 0 && `${downloadProgress.toFixed(1)}%`}</span>
-														)}
+														<span className={`truncate ${progressIndeterminate ? 'animate-pulse' : ''}`}>
+															{progressSummary || (progressStage === 'converting' ? t('converting') : t('processing'))}
+															{!progressIndeterminate && downloadProgress > 0 && ` ${downloadProgress.toFixed(downloadProgress >= 10 ? 0 : 1)}%`}
+														</span>
 													</>
 												) : (
 													<>
@@ -1420,38 +1594,114 @@ function App() {
 										)}
 									</div>
 
-									{/* Download Progress Details */}
+									{/* Download Progress */}
 									<AnimatePresence>
-										{isDownloading && (downloadSpeed || downloadedSize || eta) && (
+										{isDownloading && (
 											<motion.div
 												initial={{ opacity: 0, height: 0 }}
 												animate={{ opacity: 1, height: 'auto' }}
 												exit={{ opacity: 0, height: 0 }}
 												className="overflow-hidden"
 											>
-												<div className="glass rounded-xl p-3 flex items-center justify-between text-xs">
-													<div className="flex items-center gap-4">
+												<div className="glass rounded-xl p-3 space-y-3 border border-white/10">
+													<div className="flex items-center justify-between gap-3">
+														<div className="min-w-0 flex items-center gap-2">
+															<div className={`h-8 w-8 shrink-0 rounded-lg flex items-center justify-center ${theme.toggleBg} ${theme.icon}`}>
+																<Activity size={16} className={progressIndeterminate ? 'animate-pulse' : ''} />
+															</div>
+															<div className="min-w-0">
+																<div className="text-[11px] uppercase tracking-wide text-gray-500">{t('progressTitle')}</div>
+																<div className="text-sm font-semibold text-white truncate">
+																	{progressSummary || (progressStage === 'converting' ? t('converting') : t('processing'))}
+																</div>
+															</div>
+														</div>
+														<div className="shrink-0 text-right">
+															<div className="text-lg font-bold tabular-nums text-white">{progressPercentText}</div>
+															<div className="text-[10px] text-gray-500">{progressPhase === 'postprocessing' ? t('progressPostprocessing') : t('status')}</div>
+														</div>
+													</div>
+
+													<div className="relative h-2 overflow-hidden rounded-full bg-white/10">
+														{progressIndeterminate ? (
+															<motion.div
+																className={`absolute top-0 h-full w-1/3 rounded-full ${theme.button}`}
+																initial={{ x: '-120%' }}
+																animate={{ x: '330%' }}
+																transition={{ duration: 1.15, ease: 'linear', repeat: Infinity }}
+															/>
+														) : (
+															<motion.div
+																className={`absolute inset-y-0 left-0 rounded-full ${theme.button}`}
+																initial={{ width: 0 }}
+																animate={{ width: `${currentProgressPercent}%` }}
+																transition={{ duration: 0.25 }}
+															/>
+														)}
+													</div>
+
+													<div className="grid grid-cols-4 gap-2">
+														{progressSteps.map((step, index) => {
+															const isComplete = activeProgressStepIndex > index;
+															const isActive = activeProgressStepIndex === index;
+															return (
+																<div
+																	key={step.phase}
+																	className={`min-w-0 rounded-lg border px-2 py-1.5 text-[10px] transition-colors ${isActive
+																		? `${theme.toggleBg} border-current/30 text-gray-100`
+																		: isComplete
+																			? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+																			: 'bg-white/5 border-white/10 text-gray-500'
+																		}`}
+																>
+																	<div className="flex items-center gap-1.5 min-w-0">
+																		{isComplete ? (
+																			<CheckCircle2 size={11} className="shrink-0" />
+																		) : (
+																			<span className={`h-2 w-2 shrink-0 rounded-full ${isActive ? theme.toggle : 'bg-white/20'}`} />
+																		)}
+																		<span className="truncate">{step.label}</span>
+																	</div>
+																</div>
+															);
+														})}
+													</div>
+
+													<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-300">
 														{downloadSpeed && (
 															<div className="flex items-center gap-1.5">
 																<Zap size={12} className="text-yellow-400" />
-																<span className="text-gray-400">{t('downloadSpeed')}:</span>
-																<span className="text-white font-medium">{downloadSpeed}</span>
+																<span className="text-gray-500">{t('downloadSpeed')}</span>
+																<span className="font-medium text-white">{downloadSpeed}</span>
 															</div>
 														)}
 														{downloadedSize && totalSize && (
 															<div className="flex items-center gap-1.5">
 																<Download size={12} className="text-emerald-400" />
-																<span className="text-gray-400">{t('downloadedSize')}:</span>
-																<span className="text-white font-medium">{downloadedSize} / {totalSize}</span>
+																<span className="text-gray-500">{t('downloadedSize')}</span>
+																<span className="font-medium text-white">{downloadedSize} / {totalSize}</span>
+															</div>
+														)}
+														{eta && eta !== 'Unknown' && (
+															<div className="flex items-center gap-1.5">
+																<Clock size={12} className="text-sky-400" />
+																<span className="text-gray-500">{t('remainingTime')}</span>
+																<span className="font-medium text-white">{eta}</span>
+															</div>
+														)}
+														{progressDetail && (
+															<div className="flex min-w-0 flex-1 items-center gap-1.5">
+																<span className="text-gray-500">{t('progressCurrentStep')}</span>
+																<span className="truncate font-medium text-gray-100">{progressDetail}</span>
+															</div>
+														)}
+														{progressIndeterminate && !downloadSpeed && !progressDetail && (
+															<div className="flex items-center gap-1.5">
+																<Clock size={12} className="text-sky-400" />
+																<span className="text-gray-400">{t('progressIndeterminate')}</span>
 															</div>
 														)}
 													</div>
-													{eta && eta !== 'Unknown' && (
-														<div className="flex items-center gap-1.5">
-															<span className="text-gray-400">{t('remainingTime')}:</span>
-															<span className="text-white font-medium">{eta}</span>
-														</div>
-													)}
 												</div>
 											</motion.div>
 										)}

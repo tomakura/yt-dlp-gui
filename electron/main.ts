@@ -611,6 +611,176 @@ const buildDownloadSection = (start?: string, end?: string) => {
   return `*${rangeStart}-${rangeEnd}`;
 };
 
+const cleanupMediaExtensions = [
+  'mp4',
+  'mkv',
+  'webm',
+  'mov',
+  'm4a',
+  'mp3',
+  'flac',
+  'wav',
+  'aac',
+  'opus',
+  'ogg',
+  'weba',
+  'mka'
+];
+
+const cleanupImageExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const stripLogPath = (value: string) => value.trim().replace(/^"(.*)"$/, '$1');
+
+const maybeResolveOutputPath = (value: string, baseDir: string) => {
+  const cleaned = stripLogPath(value);
+  if (!cleaned) return null;
+  return path.isAbsolute(cleaned) ? cleaned : path.join(baseDir, cleaned);
+};
+
+const extractFinalOutputPathFromLine = (line: string, baseDir: string) => {
+  const mergerMatch = line.match(/^\[Merger\]\s+Merging formats into "(.+)"$/);
+  if (mergerMatch) {
+    return maybeResolveOutputPath(mergerMatch[1], baseDir);
+  }
+
+  const conversionMatch = line.match(
+    /^\[(ExtractAudio|VideoConvertor|VideoRemuxer|FFmpegConcat)\].*?Destination:\s+(.+)$/
+  );
+  if (conversionMatch) {
+    return maybeResolveOutputPath(conversionMatch[2], baseDir);
+  }
+
+  const moveMatch = line.match(/^\[MoveFiles\]\s+Moving file ".+?" to "(.+)"$/);
+  if (moveMatch) {
+    return maybeResolveOutputPath(moveMatch[1], baseDir);
+  }
+
+  return null;
+};
+
+const getExistingFileSize = (filePath: string) => {
+  try {
+    const stats = fs.statSync(filePath);
+    return stats.isFile() ? stats.size : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const wasFileModifiedDuringRun = (filePath: string, startedAtMs: number) => {
+  try {
+    const stats = fs.statSync(filePath);
+    return stats.isFile() && stats.mtimeMs >= startedAtMs - 5000;
+  } catch {
+    return false;
+  }
+};
+
+const isValidMediaFile = (filePath: string, ffprobePath: string | null) => {
+  const fileSize = getExistingFileSize(filePath);
+  if (fileSize <= 0 || !ffprobePath) {
+    return fileSize > 0;
+  }
+
+  try {
+    const probe = spawnSync(
+      ffprobePath,
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'stream=codec_type',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        filePath
+      ],
+      {
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: 15000
+      }
+    );
+
+    return probe.status === 0 && /\S/.test(probe.stdout);
+  } catch {
+    return true;
+  }
+};
+
+const findBestExistingOutputPath = (
+  paths: Iterable<string>,
+  ffprobePath: string | null
+) => {
+  const candidates = [...paths]
+    .map((filePath) => ({
+      filePath,
+      size: getExistingFileSize(filePath)
+    }))
+    .filter((candidate) => candidate.size > 0 && isValidMediaFile(candidate.filePath, ffprobePath));
+
+  candidates.sort((a, b) => b.size - a.size);
+  return candidates[0]?.filePath ?? '';
+};
+
+const cleanupYtDlpTemporaryFiles = async (
+  finalFilePath: string,
+  startedAtMs: number,
+  includeThumbnails: boolean
+) => {
+  const finalSize = getExistingFileSize(finalFilePath);
+  if (!finalFilePath || finalSize <= 0) {
+    return [];
+  }
+
+  const finalDir = path.dirname(finalFilePath);
+  const parsed = path.parse(finalFilePath);
+  const stem = parsed.name;
+  const escapedStem = escapeRegExp(stem);
+  const mediaPattern = cleanupMediaExtensions.map(escapeRegExp).join('|');
+  const imagePattern = cleanupImageExtensions.map(escapeRegExp).join('|');
+  const formatFilePattern = new RegExp(`^${escapedStem}\\.f[\\w-]+\\.(${mediaPattern})$`, 'i');
+  const tempMediaPattern = new RegExp(`^${escapedStem}\\.(?:temp|orig|keyframes\\.temp)\\.(${mediaPattern})$`, 'i');
+  const thumbnailPattern = new RegExp(`^${escapedStem}\\.(${imagePattern})$`, 'i');
+  const partialPattern = new RegExp(`^${escapedStem}.*\\.(?:part|ytdl|tmp)$`, 'i');
+  const cleaned: string[] = [];
+
+  let entries: string[] = [];
+  try {
+    entries = await fs.promises.readdir(finalDir);
+  } catch {
+    return cleaned;
+  }
+
+  await Promise.all(entries.map(async (entry) => {
+    const candidate = path.join(finalDir, entry);
+    if (candidate === finalFilePath) return;
+
+    const isKnownTemporaryFile =
+      formatFilePattern.test(entry) ||
+      tempMediaPattern.test(entry) ||
+      partialPattern.test(entry) ||
+      (includeThumbnails && thumbnailPattern.test(entry));
+
+    if (!isKnownTemporaryFile) return;
+
+    try {
+      const stats = await fs.promises.stat(candidate);
+      if (!stats.isFile() || stats.mtimeMs < startedAtMs - 5000) {
+        return;
+      }
+
+      await fs.promises.unlink(candidate);
+      cleaned.push(candidate);
+    } catch {
+      // Ignore cleanup failures. The download result should not depend on best-effort cleanup.
+    }
+  }));
+
+  return cleaned;
+};
+
 const showDownloadNotification = (enabled: boolean, result: DownloadResult) => {
   if (!enabled || !Notification.isSupported()) {
     return;
@@ -1713,6 +1883,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
   }
 
   const outputPath = path.join(payload.location, payload.outputTemplate || '%(title)s.%(ext)s');
+  event.reply('download-progress', `📁 出力先テンプレート: ${outputPath}`);
 
   const args: string[] = [
     ...ytDlpInvocation.argsPrefix,
@@ -1720,7 +1891,12 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     '-o',
     outputPath,
     '--no-mtime',
+    '--no-update',
     '--newline',
+    '--color',
+    'never',
+    '--progress-template',
+    'postprocess:[postprocess] %(progress._default_template)s',
     '--print', `before_dl:${titleMarker}%(title)s`,
     '--print', `after_move:${pathMarker}%(filepath)s`,
   ];
@@ -1731,6 +1907,9 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
 
   if (ffmpegPath && ffprobePath && ffmpegPath !== 'ffmpeg') {
     args.push('--ffmpeg-location', path.dirname(ffmpegPath));
+    event.reply('download-progress', `🧰 ffmpeg Path: ${ffmpegPath}`);
+  } else if (ffmpegPath) {
+    event.reply('download-progress', `🧰 ffmpeg Path: ${ffmpegPath}`);
   }
 
   // Advanced options (only for video mode or applicable audio options)
@@ -1788,7 +1967,7 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
       event.reply('download-progress', `📊 ビット深度: ${payload.options.audioBitDepth || '16'}bit`);
       // WAV doesn't support --audio-quality, use postprocessor args for bit depth
       const bitDepth = payload.options.audioBitDepth || '16';
-      args.push('--postprocessor-args', `ffmpeg:-acodec pcm_s${bitDepth}le`);
+      args.push('--postprocessor-args', `ExtractAudio+ffmpeg_o:-acodec pcm_s${bitDepth}le`);
     } else {
       event.reply('download-progress', `📊 ビットレート: ${payload.options.audioBitrate}`);
       args.push('--audio-quality', payload.options.audioBitrate);
@@ -1838,7 +2017,9 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
 
       if (postArgs.length > 0) {
         args.push('--recode-video', payload.options.videoContainer);
-        args.push('--postprocessor-args', `ffmpeg:${postArgs.join(' ')}`);
+        const ffmpegOutputArgs = postArgs.join(' ');
+        args.push('--postprocessor-args', `Merger+ffmpeg_o:${ffmpegOutputArgs}`);
+        args.push('--postprocessor-args', `VideoConvertor+ffmpeg_o:${ffmpegOutputArgs}`);
       }
     }
   }
@@ -1851,6 +2032,9 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
 
   let downloadedTitle = '';
   let downloadedFilepath = '';
+  const startedAtMs = Date.now();
+  const finalCandidatePaths = new Set<string>();
+  const recentErrorLines: string[] = [];
 
   const sendCompletion = (result: DownloadResult) => {
     event.reply('download-complete', result);
@@ -1889,7 +2073,18 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
 
         if (line.startsWith(pathMarker)) {
           downloadedFilepath = line.slice(pathMarker.length);
+          finalCandidatePaths.add(downloadedFilepath);
           return;
+        }
+
+        const candidatePath = extractFinalOutputPathFromLine(line, payload.location);
+        if (candidatePath) {
+          finalCandidatePaths.add(candidatePath);
+        }
+
+        if (/ERROR:|WARNING:|failed|Unable to|PostProcessingError/i.test(line)) {
+          recentErrorLines.push(line);
+          recentErrorLines.splice(0, Math.max(0, recentErrorLines.length - 10));
         }
 
         event.reply('download-progress', line);
@@ -1908,6 +2103,10 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
     activeDownloadProcess.stderr.setEncoding('utf8');
     activeDownloadProcess.stderr.on('data', (data: string) => {
       forwardOutput(String(data), (line) => {
+        if (/ERROR:|WARNING:|failed|Unable to|PostProcessingError/i.test(line)) {
+          recentErrorLines.push(line);
+          recentErrorLines.splice(0, Math.max(0, recentErrorLines.length - 10));
+        }
         event.reply('download-progress', line);
       }, stderrBuffer);
     });
@@ -1947,22 +2146,51 @@ ipcMain.on('download', async (event, payload: DownloadPayload) => {
       return;
     }
 
-    let fileSize = 0;
-    if (downloadedFilepath && fs.existsSync(downloadedFilepath)) {
-      try {
-        const stats = fs.statSync(downloadedFilepath);
-        fileSize = stats.size;
-      } catch (e) {
-        // Ignore file stat errors
-      }
+    if (!downloadedFilepath) {
+      downloadedFilepath = findBestExistingOutputPath(finalCandidatePaths, ffprobePath);
     }
 
+    const isGeneratedMediaUsable = downloadedFilepath
+      ? isValidMediaFile(downloadedFilepath, ffprobePath) &&
+        wasFileModifiedDuringRun(downloadedFilepath, startedAtMs)
+      : false;
+    const fileSize = downloadedFilepath ? getExistingFileSize(downloadedFilepath) : 0;
+
     if (code === 0) {
+      const cleanedFiles = await cleanupYtDlpTemporaryFiles(
+        downloadedFilepath,
+        startedAtMs,
+        payload.advancedOptions.embedThumbnail
+      );
+      if (cleanedFiles.length) {
+        event.reply('download-progress', `🧹 一時ファイルを削除しました: ${cleanedFiles.map(file => path.basename(file)).join(', ')}`);
+      }
       event.reply('download-progress', '✅ ダウンロードが完了しました！');
       sendCompletion({
         status: 'complete',
         success: true,
         message: 'ダウンロードが完了しました。',
+        title: downloadedTitle,
+        filename: downloadedFilepath,
+        fileSize
+      });
+    } else if (isGeneratedMediaUsable) {
+      const cleanedFiles = await cleanupYtDlpTemporaryFiles(
+        downloadedFilepath,
+        startedAtMs,
+        payload.advancedOptions.embedThumbnail
+      );
+      if (cleanedFiles.length) {
+        event.reply('download-progress', `🧹 一時ファイルを削除しました: ${cleanedFiles.map(file => path.basename(file)).join(', ')}`);
+      }
+      event.reply('download-progress', `⚠️ 後処理で警告がありましたが、出力ファイルは生成されています。終了コード: ${code}`);
+      if (recentErrorLines.length) {
+        event.reply('download-progress', `⚠️ 後処理の詳細: ${recentErrorLines[recentErrorLines.length - 1]}`);
+      }
+      sendCompletion({
+        status: 'complete',
+        success: true,
+        message: 'ダウンロードは完了しました（後処理で警告がありました）。',
         title: downloadedTitle,
         filename: downloadedFilepath,
         fileSize
